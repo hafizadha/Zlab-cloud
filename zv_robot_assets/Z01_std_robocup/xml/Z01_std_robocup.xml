@@ -1,0 +1,120 @@
+<?xml version="1.0" encoding="utf-8"?>
+<mujoco model="Z01_std_robocup">
+  <!-- 由 robot_assets/utils/gen_robocup_multi_xml.py 生成，请勿手改；6 台机器人本体在 robots/robot_0X.xml（同样是生成物），唯一真源是 Z01_std_parallel_ankle/xml/Z01_std_parallel_ankle.xml-->
+  <compiler angle="radian" meshdir="../../Z01_std_football_player/meshes/" />
+  <size njmax="4000" nconmax="2000" />
+  <visual>
+    <map znear="0.046570" zfar="232.852174" />
+  </visual>
+  <default>
+    <joint damping="0.05" frictionloss="0.1" />
+  </default>
+  <asset>
+    <mesh name="torso_link" file="torso_link.stl" scale="0.001 0.001 0.001" />
+    <mesh name="left_shoulder_pitch_link" file="left_shoulder_pitch_link.stl" scale="0.001 0.001 0.001" />
+    <mesh name="left_shoulder_roll_link" file="left_shoulder_roll_link.STL" scale="0.001 0.001 0.001" />
+    <mesh name="left_shoulder_yaw_link" file="left_shoulder_yaw_link.stl" scale="0.001 0.001 0.001" />
+    <mesh name="left_elbow_link" file="left_elbow_link.stl" scale="0.001 0.001 0.001" />
+    <mesh name="left_wrist_yaw_link" file="left_wrist_yaw_link.stl" scale="0.001 0.001 0.001" />
+    <mesh name="left_wrist_pitch_link" file="left_wrist_pitch_link.stl" scale="0.001 0.001 0.001" />
+    <mesh name="left_wrist_roll_link" file="left_wrist_roll_link.stl" scale="0.001 0.001 0.001" />
+    <mesh name="T4Lhand" file="T4Lhand.STL" scale="0.001 0.001 0.001" />
+    <mesh name="right_shoulder_pitch_link" file="right_shoulder_pitch_link.stl" scale="0.001 0.001 0.001" />
+    <mesh name="right_shoulder_roll_link" file="right_shoulder_roll_link.stl" scale="0.001 0.001 0.001" />
+    <mesh name="right_shoulder_yaw_link" file="right_shoulder_yaw_link.stl" scale="0.001 0.001 0.001" />
+    <mesh name="right_elbow_link" file="right_elbow_link.stl" scale="0.001 0.001 0.001" />
+    <mesh name="right_wrist_yaw_link" file="right_wrist_yaw_link.stl" scale="0.001 0.001 0.001" />
+    <mesh name="right_wrist_pitch_link" file="right_wrist_pitch_link.stl" scale="0.001 0.001 0.001" />
+    <mesh name="right_wrist_roll_link" file="right_wrist_roll_link.stl" scale="0.001 0.001 0.001" />
+    <mesh name="T4Rhand" file="T4Rhand.STL" scale="0.001 0.001 0.001" />
+    <mesh name="waist_yaw_link" file="waist_yaw_link.stl" scale="0.001 0.001 0.001" />
+    <mesh name="left_hip_pitch_link" file="left_hip_pitch_link.stl" scale="0.001 0.001 0.001" />
+    <mesh name="left_hip_roll_link" file="left_hip_roll_link.stl" scale="0.001 0.001 0.001" />
+    <mesh name="left_hip_yaw_link" file="left_hip_yaw_link.stl" scale="0.001 0.001 0.001" />
+    <mesh name="left_knee_link" file="left_knee_link.STL" scale="0.001 0.001 0.001" />
+    <mesh name="left_ankle_pitch_link" file="left_ankle_pitch_link.stl" scale="0.001 0.001 0.001" />
+    <mesh name="left_ankle_roll_link" file="left_ankle_roll_link.stl" scale="0.001 0.001 0.001" />
+    <mesh name="right_hip_pitch_link" file="right_hip_pitch_link.stl" scale="0.001 0.001 0.001" />
+    <mesh name="right_hip_roll_link" file="right_hip_roll_link.stl" scale="0.001 0.001 0.001" />
+    <mesh name="right_hip_yaw_link" file="right_hip_yaw_link.stl" scale="0.001 0.001 0.001" />
+    <mesh name="right_knee_link" file="right_knee_link.STL" scale="0.001 0.001 0.001" />
+    <mesh name="right_ankle_pitch_link" file="right_ankle_pitch_link.stl" scale="0.001 0.001 0.001" />
+    <mesh name="right_ankle_roll_link" file="right_ankle_roll_link.stl" scale="0.001 0.001 0.001" />
+    <mesh name="head_yaw_link" file="head_yaw_link.stl" scale="0.001 0.001 0.001" />
+    <texture type="skybox" builtin="gradient" rgb1="0.3 0.5 0.7" rgb2="0 0 0" width="512" height="512" />
+    <texture name="texplane" type="2d" builtin="checker" width="512" height="512" rgb1="0.2 0.3 0.4" rgb2="0.1 0.15 0.2" mark="cross" markrgb="0.8 0.8 0.8" />
+    <material name="matplane" texture="texplane" reflectance="0.3" texrepeat="1 1" texuniform="true" />
+    <include file="../../Z01_std_football_player/xml/scene/soccer_field_assets.xml" />
+  </asset>
+  <include file="robots/robot_01.xml" />
+  <include file="robots/robot_02.xml" />
+  <include file="robots/robot_03.xml" />
+  <include file="robots/robot_04.xml" />
+  <include file="robots/robot_05.xml" />
+  <include file="robots/robot_06.xml" />
+  <worldbody>
+    <light directional="true" diffuse=".4 .4 .4" specular="0.1 0.1 0.1" pos="0 0 5.0" dir="0 0 -1" castshadow="false" />
+    <light directional="true" diffuse=".6 .6 .6" specular="0.2 0.2 0.2" pos="0 0 4" dir="0 0 -1" castshadow="false" />
+    <geom name="ground" type="plane" pos="0 0 0" size="0 0 1" material="matplane" condim="1" />
+    <geom name="field_ground" type="plane" pos="0 0 0.0005" size="11 7.5 0.5" material="field_mat" condim="1" friction="1.0 0.005 0.0001" />
+    <geom name="line_goal_self" type="box" pos="-7.0000 0.0000 0.002" size="0.0250 4.5000 0.001" material="line_mat" contype="0" conaffinity="0" group="2" />
+    <geom name="line_goal_oppo" type="box" pos="7.0000 0.0000 0.002" size="0.0250 4.5000 0.001" material="line_mat" contype="0" conaffinity="0" group="2" />
+    <geom name="line_touch_left" type="box" pos="0.0000 4.5000 0.002" size="7.0000 0.0250 0.001" material="line_mat" contype="0" conaffinity="0" group="2" />
+    <geom name="line_touch_right" type="box" pos="0.0000 -4.5000 0.002" size="7.0000 0.0250 0.001" material="line_mat" contype="0" conaffinity="0" group="2" />
+    <geom name="line_middle" type="box" pos="0.0000 0.0000 0.002" size="0.0250 4.5000 0.001" material="line_mat" contype="0" conaffinity="0" group="2" />
+    <geom name="center_circle" type="mesh" mesh="circle_ring_mesh" pos="0 0 0.002" material="line_mat" contype="0" conaffinity="0" group="2" />
+    <geom name="pen_self_front" type="box" pos="-4.0000 0.0000 0.002" size="0.0250 3.0000 0.001" material="line_mat" contype="0" conaffinity="0" group="2" />
+    <geom name="pen_self_top" type="box" pos="-5.5000 3.0000 0.002" size="1.5000 0.0250 0.001" material="line_mat" contype="0" conaffinity="0" group="2" />
+    <geom name="pen_self_bottom" type="box" pos="-5.5000 -3.0000 0.002" size="1.5000 0.0250 0.001" material="line_mat" contype="0" conaffinity="0" group="2" />
+    <geom name="pen_oppo_front" type="box" pos="4.0000 0.0000 0.002" size="0.0250 3.0000 0.001" material="line_mat" contype="0" conaffinity="0" group="2" />
+    <geom name="pen_oppo_top" type="box" pos="5.5000 3.0000 0.002" size="1.5000 0.0250 0.001" material="line_mat" contype="0" conaffinity="0" group="2" />
+    <geom name="pen_oppo_bottom" type="box" pos="5.5000 -3.0000 0.002" size="1.5000 0.0250 0.001" material="line_mat" contype="0" conaffinity="0" group="2" />
+    <geom name="goal_area_self_front" type="box" pos="-6.0000 0.0000 0.002" size="0.0250 2.0000 0.001" material="line_mat" contype="0" conaffinity="0" group="2" />
+    <geom name="goal_area_self_top" type="box" pos="-6.5000 2.0000 0.002" size="0.5000 0.0250 0.001" material="line_mat" contype="0" conaffinity="0" group="2" />
+    <geom name="goal_area_self_bottom" type="box" pos="-6.5000 -2.0000 0.002" size="0.5000 0.0250 0.001" material="line_mat" contype="0" conaffinity="0" group="2" />
+    <geom name="goal_area_oppo_front" type="box" pos="6.0000 0.0000 0.002" size="0.0250 2.0000 0.001" material="line_mat" contype="0" conaffinity="0" group="2" />
+    <geom name="goal_area_oppo_top" type="box" pos="6.5000 2.0000 0.002" size="0.5000 0.0250 0.001" material="line_mat" contype="0" conaffinity="0" group="2" />
+    <geom name="goal_area_oppo_bottom" type="box" pos="6.5000 -2.0000 0.002" size="0.5000 0.0250 0.001" material="line_mat" contype="0" conaffinity="0" group="2" />
+    <geom name="penalty_spot_self" type="cylinder" pos="-4.9000 0 0.002" size="0.06 0.001" material="line_mat" contype="0" conaffinity="0" group="2" />
+    <geom name="penalty_spot_oppo" type="cylinder" pos="4.9000 0 0.002" size="0.06 0.001" material="line_mat" contype="0" conaffinity="0" group="2" />
+    <body name="goal_oppo_group" pos="7.0200 0 0" euler="0 0 3.1416">
+      <body name="goal_left_post" pos="0 1.30 0">
+        <geom type="capsule" fromto="0 0 0  0 0 1.20" size="0.025" material="goal_post_mat" />
+      </body>
+      <body name="goal_right_post" pos="0 -1.30 0">
+        <geom type="capsule" fromto="0 0 0  0 0 1.20" size="0.025" material="goal_post_mat" />
+      </body>
+      <body name="goal_crossbar" pos="0 0 1.20">
+        <geom type="capsule" fromto="0 -1.30 0  0 1.30 0" size="0.025" material="goal_post_mat" />
+      </body>
+      <body name="goal_net" pos="-0.225 0 0.60">
+        <geom name="goal_net_back" type="box" pos="-0.225 0 0" size="0.02 1.30 0.60" rgba="0.95 0.95 0.95 0.3" condim="3" />
+        <geom name="goal_net_top" type="box" pos="0 0 0.60" size="0.22 1.30 0.01" rgba="0.95 0.95 0.95 0.3" />
+        <geom name="goal_net_l" type="box" pos="0 -1.30 0" size="0.22 0.01 0.60" rgba="0.95 0.95 0.95 0.3" />
+        <geom name="goal_net_r" type="box" pos="0 1.30 0" size="0.22 0.01 0.60" rgba="0.95 0.95 0.95 0.3" />
+      </body>
+    </body>
+    <body name="goal_self_post_l" pos="-7.0200 1.30 0">
+      <geom type="capsule" fromto="0 0 0  0 0 1.20" size="0.025" material="goal_post_mat" />
+    </body>
+    <body name="goal_self_post_r" pos="-7.0200 -1.30 0">
+      <geom type="capsule" fromto="0 0 0  0 0 1.20" size="0.025" material="goal_post_mat" />
+    </body>
+    <body name="goal_self_crossbar" pos="-7.0200 0 1.20">
+      <geom type="capsule" fromto="0 -1.30 0  0 1.30 0" size="0.025" material="goal_post_mat" />
+    </body>
+    <body name="goal_self_net" pos="-7.0200 0 0.60">
+      <geom type="box" pos="-0.45 0 0" size="0.02 1.30 0.60" rgba="0.95 0.95 0.95 0.3" condim="3" />
+      <geom type="box" pos="-0.225 0 0.60" size="0.22 1.30 0.01" rgba="0.95 0.95 0.95 0.3" />
+      <geom type="box" pos="-0.225 -1.30 0" size="0.22 0.01 0.60" rgba="0.95 0.95 0.95 0.3" />
+      <geom type="box" pos="-0.225 1.30 0" size="0.22 0.01 0.60" rgba="0.95 0.95 0.95 0.3" />
+    </body>
+    <body name="soccer_ball" pos="0.0000 0.0000 0.1100">
+      <freejoint name="ball_free_joint" />
+      <geom name="ball_geom" type="sphere" size="0.11" mass="0.4" material="ball_material" condim="6" friction="0.8 0.005 0.004" solref="0.02 1" solimp="0.9 0.95 0.001 0.5 2" priority="1" />
+    </body>
+    <body name="ball_preview" mocap="true" pos="0.0000 0.0000 -1.0000">
+      <geom name="ball_preview_geom" type="sphere" size="0.05" rgba="1.0 0.85 0.0 0.8" contype="0" conaffinity="0" />
+    </body>
+  </worldbody>
+</mujoco>

@@ -1,0 +1,104 @@
+# Z01_std_parallel_ankle URDF → XML 生成配置
+# 躯干/头部与 Z01_std_add_head 一致；踝部按 Z01_edm_parallel_ankle 的并联机构改造：
+# 原踝关节改被动、主动关节 ankle_1/2 驱动（由 URDF 提供）、电机重定向、曲柄/足端 site、
+# 连杆 tendon + 刚性 equality 约束（数值照抄 Z01_edm_parallel_ankle.xml）。
+
+extends: ../Z01_std_add_head/urdf_to_xml.yaml
+
+validate:
+  strict: false          # 并联踝改造（踝关节改名/被动化、电机重定向）不满足集合相等断言
+
+patches:
+  # --- 原踝关节改为被动（重命名 + 大阻尼，去掉 actuatorfrcrange）---
+  - {op: remove, xpath: "worldbody/.//joint[@name='left_ankle_pitch']"}
+  - op: insert
+    insert: 1
+    xpath: "worldbody/.//body[@name='left_ankle_pitch_link']"
+    xml: |
+      <joint name="left_ankle_passive_pitch_joint" pos="0 0 0" axis="0 1 0" range="-0.872 0.523" damping="0.5" frictionloss="0.2"/>
+  - {op: remove, xpath: "worldbody/.//joint[@name='left_ankle_roll']"}
+  - op: insert
+    insert: 1
+    xpath: "worldbody/.//body[@name='left_ankle_roll_link']"
+    xml: |
+      <joint name="left_ankle_passive_roll_joint" pos="0 0 0" axis="1 0 0" range="-0.261 0.261" damping="0.5" frictionloss="0.2"/>
+  - {op: remove, xpath: "worldbody/.//joint[@name='right_ankle_pitch']"}
+  - op: insert
+    insert: 1
+    xpath: "worldbody/.//body[@name='right_ankle_pitch_link']"
+    xml: |
+      <joint name="right_ankle_passive_pitch_joint" pos="0 0 0" axis="0 1 0" range="-0.872 0.523" damping="0.5" frictionloss="0.2"/>
+  - {op: remove, xpath: "worldbody/.//joint[@name='right_ankle_roll']"}
+  - op: insert
+    insert: 1
+    xpath: "worldbody/.//body[@name='right_ankle_roll_link']"
+    xml: |
+      <joint name="right_ankle_passive_roll_joint" pos="0 0 0" axis="1 0 0" range="-0.261 0.261" damping="0.5" frictionloss="0.2"/>
+  # --- 电机：删除自动生成的 ankle_1/2 motor，原踝 motor 重定向到主动关节 ---
+  - {op: remove, xpath: "actuator/motor[@joint='left_ankle_1']"}
+  - {op: remove, xpath: "actuator/motor[@joint='left_ankle_2']"}
+  - {op: remove, xpath: "actuator/motor[@joint='right_ankle_1']"}
+  - {op: remove, xpath: "actuator/motor[@joint='right_ankle_2']"}
+  - {op: set, xpath: "actuator/motor[@joint='left_ankle_pitch']", set: {joint: left_ankle_1, ctrlrange: "-36.0 36.0"}}
+  - {op: set, xpath: "actuator/motor[@joint='left_ankle_roll']", set: {joint: left_ankle_2, ctrlrange: "-36.0 36.0"}}
+  - {op: set, xpath: "actuator/motor[@joint='right_ankle_pitch']", set: {joint: right_ankle_1, ctrlrange: "-36.0 36.0"}}
+  - {op: set, xpath: "actuator/motor[@joint='right_ankle_roll']", set: {joint: right_ankle_2, ctrlrange: "-36.0 36.0"}}
+  # --- 曲柄 site 与足端 site ---
+  - op: append
+    xpath: "worldbody/.//body[@name='left_ankle_1_link']"
+    xml: |
+      <site name="left_crank_1_site" pos="0 0.01988 -0.00223" rgba="1 0 0 1"/>
+  - op: append
+    xpath: "worldbody/.//body[@name='left_ankle_2_link']"
+    xml: |
+      <site name="left_crank_2_site" pos="0 -0.01988 -0.00216" rgba="1 0 0 1"/>
+  - op: append
+    xpath: "worldbody/.//body[@name='right_ankle_1_link']"
+    xml: |
+      <site name="right_crank_1_site" pos="0 -0.01988 -0.00223" rgba="1 0 0 1"/>
+  - op: append
+    xpath: "worldbody/.//body[@name='right_ankle_2_link']"
+    xml: |
+      <site name="right_crank_2_site" pos="0 0.01988 -0.00216" rgba="1 0 0 1"/>
+  - op: append
+    xpath: "worldbody/.//body[@name='left_ankle_roll_link']"
+    xml: |
+      <site name="left_foot" rgba="1 0 0 1" pos="0.044 0 -0.052"/>
+      <site name="left_foot_1_site" pos="0.023 0.0147 0.012" rgba="0 1 0 1"/>
+      <site name="left_foot_2_site" pos="0.023 -0.0147 0.012" rgba="0 1 0 1"/>
+  - op: append
+    xpath: "worldbody/.//body[@name='right_ankle_roll_link']"
+    xml: |
+      <site name="right_foot" rgba="1 0 0 1" pos="0.044 0 -0.052"/>
+      <site name="right_foot_1_site" pos="0.023 -0.0147 0.012" rgba="0 1 0 1"/>
+      <site name="right_foot_2_site" pos="0.023 0.0147 0.012" rgba="0 1 0 1"/>
+  # --- 连杆 tendon + 刚性 equality 约束 ---
+  - op: append
+    xpath: "."
+    xml: |
+      <tendon>
+        <spatial name="left_rod_1_tendon">
+          <site site="left_crank_1_site"/>
+          <site site="left_foot_1_site"/>
+        </spatial>
+        <spatial name="left_rod_2_tendon">
+          <site site="left_crank_2_site"/>
+          <site site="left_foot_2_site"/>
+        </spatial>
+      </tendon>
+      <tendon>
+        <spatial name="right_rod_1_tendon">
+          <site site="right_crank_1_site"/>
+          <site site="right_foot_1_site"/>
+        </spatial>
+        <spatial name="right_rod_2_tendon">
+          <site site="right_crank_2_site"/>
+          <site site="right_foot_2_site"/>
+        </spatial>
+      </tendon>
+      <equality>
+        <tendon name="left_rod_1_rigid" tendon1="left_rod_1_tendon" solimp="0.999 0.999 0.001 0.5 2" solref="0.02 1"/>
+        <tendon name="left_rod_2_rigid" tendon1="left_rod_2_tendon" solimp="0.999 0.999 0.001 0.5 2" solref="0.02 1"/>
+        <tendon name="right_rod_1_rigid" tendon1="right_rod_1_tendon" solimp="0.999 0.999 0.001 0.5 2" solref="0.02 1"/>
+        <tendon name="right_rod_2_rigid" tendon1="right_rod_2_tendon" solimp="0.999 0.999 0.001 0.5 2" solref="0.02 1"/>
+      </equality>

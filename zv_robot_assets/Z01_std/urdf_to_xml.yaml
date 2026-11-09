@@ -1,0 +1,72 @@
+# Z01_std URDF → XML 生成配置（量产版，与 Z01_edm 相互独立，不复用其配置）
+# 基座高度/执行器/装饰补丁对齐手写 t4_std.xml；地面/传感器走脚本内置默认（t4 式）；
+# armature 取自 csv 手工填写值，关节限幅不设逐关节规则（保留 URDF effort 导入值）。
+
+freejoint:
+  pos: "0 0 0.9"        # 基座初始高度（对齐 t4_std.xml）
+
+default:
+  joint: {armature: null}   # 无默认 armature，逐关节规则见下
+
+joints:                     # armature 来自 csv 手工填写值（URDF 无此属性）
+  - {pattern: "*_shoulder_*",  armature: 0.0027}
+  - {pattern: "*_elbow*",      armature: 0.0027}
+  - {pattern: "*_wrist_yaw",   armature: 0.0027}
+  - {pattern: "*_wrist_*",     armature: 0.005521}
+  - {pattern: "waist_pitch",   armature: 0.0027}
+  - {pattern: "waist_roll",    armature: 0.0027}
+  - {pattern: "waist_yaw",     armature: 0.041}
+  - {pattern: "*_hip_pitch",   armature: 0.041}
+  - {pattern: "*_hip_roll",    armature: 0.041}
+  - {pattern: "*_hip_yaw",     armature: 0.041}
+  - {pattern: "*_knee*",       armature: 0.041}
+  - {pattern: "*_ankle_pitch", armature: 0.0077733}
+  - {pattern: "*_ankle_roll",  armature: 0.0026244}
+
+motors:
+  ctrlrange: frcrange    # 跟随关节最终 actuatorfrcrange
+  rules:
+    - {pattern: "waist_pitch", ctrlrange: 7200}   # 对齐 t4_std.xml 的例外
+    - {pattern: "waist_roll",  ctrlrange: 7200}
+
+visuals:
+  collision_rgba: "0.76 0.76 0.76 0"   # 恢复踝部碰撞 box 的透明调试色
+
+# 装饰调试几何（rgba α=0，URDF 中已被注释掉、无法自动生成，来自手写 t4_std.xml）
+patches:
+  - xpath: "worldbody/body[@name='torso_link']"
+    append: |
+      <geom pos="0 0 0.12" type="box" size="0.05 0.08 0.17" rgba="0.76 0.76 0.76 0"/>
+      <geom pos="0 0 0.36" size="0.06" rgba="0.76 0.76 0.76 0"/>
+  - xpath: "worldbody/.//body[@name='left_shoulder_roll_link']"
+    append: |
+      <geom quat="0.707388 0 0.706825 0" type="cylinder" size="0.04 0.03" rgba="0.76 0.76 0.76 0"/>
+  - xpath: "worldbody/.//body[@name='right_shoulder_roll_link']"
+    append: |
+      <geom quat="0.707388 0 0.706825 0" type="cylinder" size="0.04 0.03" rgba="0.76 0.76 0.76 0"/>
+  - xpath: "worldbody/.//body[@name='left_elbow_link']"
+    append: |
+      <geom quat="0.707388 0.706825 0 0" type="cylinder" size="0.04 0.025" rgba="0.76 0.76 0.76 0"/>
+  - xpath: "worldbody/.//body[@name='right_elbow_link']"
+    append: |
+      <geom quat="0.707388 0.706825 0 0" type="cylinder" size="0.04 0.025" rgba="0.76 0.76 0.76 0"/>
+  - xpath: "worldbody/.//body[@name='left_wrist_roll_link']"
+    append: |
+      <geom pos="0 0 -0.02" type="box" size="0.025 0.015 0.05" rgba="0.76 0.76 0.76 0"/>
+  - xpath: "worldbody/.//body[@name='right_wrist_roll_link']"
+    append: |
+      <geom pos="0 0 -0.02" type="box" size="0.025 0.015 0.05" rgba="0.76 0.76 0.76 0"/>
+  - xpath: "worldbody/.//body[@name='left_hip_roll_link']"
+    append: |
+      <geom quat="0.707388 0 0.706825 0" type="cylinder" size="0.045 0.065" rgba="0.76 0.76 0.76 0"/>
+  - xpath: "worldbody/.//body[@name='right_hip_roll_link']"
+    append: |
+      <geom quat="0.707388 0 0.706825 0" type="cylinder" size="0.045 0.065" rgba="0.76 0.76 0.76 0"/>
+  - xpath: "worldbody/.//body[@name='left_knee_link']"
+    append: |
+      <geom quat="0.707388 0.706825 0 0" type="cylinder" size="0.05 0.05" rgba="0.76 0.76 0.76 0"/>
+      <geom pos="0 0 -0.16" type="cylinder" size="0.04 0.14" rgba="0.76 0.76 0.76 0"/>
+  - xpath: "worldbody/.//body[@name='right_knee_link']"
+    append: |
+      <geom quat="0.707388 0.706825 0 0" type="cylinder" size="0.05 0.05" rgba="0.76 0.76 0.76 0"/>
+      <geom pos="0 0 -0.16" type="cylinder" size="0.04 0.14" rgba="0.76 0.76 0.76 0"/>

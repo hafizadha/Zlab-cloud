@@ -1,0 +1,11 @@
+<!-- 足球场资源段（纹理/材质/网格）：由 t4_std_parallel.xml 的 <asset>
+     内 <include> 引入。仅包含 <asset> 段，无 <mujoco> 根标签。
+     尺寸与配色来源 robocup_field.xml（gen_robocup_field.py 生成）。 -->
+<asset>
+  <texture name="field_tex" type="2d" builtin="checker" rgb1="0.12 0.52 0.12" rgb2="0.16 0.58 0.16" width="300" height="300"/>
+  <material name="field_mat" texture="field_tex" texuniform="true" texrepeat="14 9" reflectance="0"/>
+  <material name="line_mat" rgba="1 1 1 1"/>
+  <material name="goal_post_mat" rgba="0.92 0.92 0.92 1"/>
+  <material name="ball_material" rgba="0.2 0.6 0.9 1.0" reflectance="0.3"/>
+  <mesh name="circle_ring_mesh" file="center_circle_ring.obj" scale="1 1 1"/>
+</asset>

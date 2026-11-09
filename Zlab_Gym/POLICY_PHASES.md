@@ -1,0 +1,11 @@
+# Z01 walking policy progress
+
+Progress as of 10 November 2026. The progression is **walking → fast walking → stride walking**.
+
+| Phase | Policy and training objective | Main rewards and penalties | Results |
+| --- | --- | --- | --- |
+| Walking | Fine-tuned Zoomlion’s flat-ground ONNX policy for standing and straight walking at **0.2–0.8 m/s**. Used its original joint offsets, motor gains, and observation normalization. | Rewards forward and yaw command tracking, upright posture, standing height, and limb symmetry. Penalizes foot slip, narrow stance, abrupt motor commands, body rotation, and self-contact. | `model_499.pt` walked and balanced well in the viewer. When tested above its training range at **1.5 m/s**, it finished upright in **15/16** trials, stopped within tolerance in **14/16**, and had **0.321 m/s** mean forward speed error. |
+| Fast walking | Continued from the walking checkpoint with forward commands up to **1.6 m/s** and standing commands on **20%** of draws. | Uses the same balance, speed tracking, and smoothness terms as walking. Higher commands supply the incentive to move faster. | The 60-update pilot `model_558.pt` finished upright in **16/16** trials and stopped in **14/16** at 1.5 m/s. Speed error rose to **0.389 m/s**. The user later observed faster walking and intermittent stops in `model_800.pt`. That checkpoint has no fixed-speed result recorded here. Standing commands are one possible cause of the stops. |
+| Stride walking | Builds on fast walking and targets a longer, quicker step while maintaining balance. Viewer playback commands a constant **1.35 m/s**. | Retains walking rewards. Adds a stall penalty (**−2.0**) when forward speed is below half the active forward command, and a touchdown reward (**+8.0**) for landing ahead of the supporting foot with a swing near **0.22 s**. Step length targets scale with commanded speed. | One GPU update from fast-walking `model_800.pt` loaded, trained, and saved in a temporary directory. Full training and comparative stride results are pending. |
+
+The 1.5 m/s comparisons used 16 seeded starts and the same stand, accelerate, cruise, and brake sequence. “Stopped” means upright with planar speed below 0.15 m/s at the end. [Benchmark logs](benchmarks/fast-walking) · [Walking and stride configuration](src/tasks/velocity/config/z01_std_add_head/running.py)

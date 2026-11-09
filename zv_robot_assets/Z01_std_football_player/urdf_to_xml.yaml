@@ -1,0 +1,31 @@
+# Z01_std_football_player URDF → XML 生成配置
+# 机器人本体与 Z01_std_parallel_ankle 完全一致（csv/urdf/网格直接复制）；
+# 场景部分由 xml/scene/ 提供：
+#   - scene/soccer_field_assets.xml：纹理/材质/中圈环网格（并入 <asset>）
+#   - scene/soccer_field.xml：草坪/白线/双方球门/足球/放置预览点（并入 <worldbody>）
+#
+# 注意（重新生成时）：本配置含 <include> 补丁，而生成器的校验用
+# MjSpec.from_string（无文件基准目录）无法解析 include。重新生成时需两阶段：
+#   1) 临时移除两个 include 补丁 → 生成 --final（默认输出 xml/<模型>_generated.xml）
+#   2) 生成后把两个 include 行按下面的位置插回最终 XML
+#      （<asset> 末尾、<worldbody> 首位），再重命名/覆盖 xml/Z01_std_football_player.xml
+
+extends: ../Z01_std_parallel_ankle/urdf_to_xml.yaml
+
+patches:
+  # --- 场景资源（纹理/材质/中圈网格）并入 <asset> ---
+  - op: append
+    xpath: "asset"
+    xml: |
+      <include file="scene/soccer_field_assets.xml"/>
+  # --- 场地与世界场景（草坪/白线/双方球门/足球/预览点）并入 <worldbody> 末尾 ---
+  # 必须置于机器人之后：场地自带足球（soccer_ball 的 freejoint），若排在机器人
+  # 之前会占据 qpos[0:7]，使仿真节点的基座初始化（硬编码 qpos[0:7]）写错对象。
+  - op: append
+    xpath: "worldbody"
+    xml: |
+      <include file="scene/soccer_field.xml"/>
+  # --- 保留生成器默认地面（geom name="ground"，不参与足球模式的显隐）---
+  # 目的：soccer_mode 关闭时场地（field_ground 等 field_* 前缀 geom）会被整体
+  # 隐藏（contype/conaffinity 置 0），若模型自身没有地面，机器人会一直下落。
+  # 场地可见时 field_ground 位于 z=0.0005，高于本地面，机器人实际踩在草地上。
