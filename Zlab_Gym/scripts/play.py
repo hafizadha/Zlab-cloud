@@ -44,7 +44,7 @@ class PlayConfig:
   eval_episodes: int = 0
   """Run this many soccer episodes headlessly and report goals, falls, and setup time."""
   eval_run_speed: float | None = None
-  """Evaluate stand, accelerate, cruise, and stop at this peak speed in m/s."""
+  """Evaluate a speed ramp in m/s, or stand throughout when the speed is zero."""
   seed: int | None = None
   no_terminations: bool = False
   """Disable all termination conditions (useful for viewing motions with dummy agents)."""
@@ -83,6 +83,11 @@ def run_play(task_id: str, cfg: PlayConfig):
     "Z01-StdAddHead-Velocity-Walk",
     "Z01-StdAddHead-Velocity-FastWalk",
     "Z01-StdAddHead-Velocity-StrideWalk",
+    "Z01-StdAddHead-Velocity-LongStrideWalk",
+    "Z01-StdAddHead-Velocity-RobustWalk1",
+    "Z01-StdAddHead-Velocity-RobustWalk2",
+    "Z01-StdAddHead-Velocity-RobustWalk3",
+    "Z01-StdAddHead-Velocity-BalanceRecovery",
   )
   if cfg.eval_episodes < 0 or (
     cfg.eval_episodes and (not soccer_task or cfg.no_terminations)
@@ -91,8 +96,8 @@ def run_play(task_id: str, cfg: PlayConfig):
   if cfg.seed is not None:
     env_cfg.seed = cfg.seed
   if cfg.eval_run_speed is not None:
-    if not (running_task or walking_task) or not 0 < cfg.eval_run_speed <= 3 or cfg.no_terminations:
-      raise ValueError("--eval-run-speed requires a walking or running task, a speed in (0, 3], and terminations.")
+    if not (running_task or walking_task) or not 0 <= cfg.eval_run_speed <= 3 or cfg.no_terminations:
+      raise ValueError("--eval-run-speed requires a walking or running task, a speed in [0, 3], and terminations.")
     command = env_cfg.commands["twist"]
     command.resampling_time_range = (100.0, 100.0)
     command.rel_standing_envs = 0.0
@@ -250,8 +255,9 @@ def evaluate_run(env: RslRlVecEnvWrapper, policy: Callable, speed: float) -> Non
   contact = scene["feet_ground_contact"].data
   dt = env.unwrapped.step_dt
   cruise_samples = 0
+  forward_speed = 0.0
   forward_error = sideways_speed = flight_samples = 0.0
-  stalled_samples = touchdown_count = total_step_length = 0.0
+  stalled_samples = backward_samples = touchdown_count = total_step_length = 0.0
   for step in range(round(10 / dt)):
     t = step * dt
     # Stand 1 s, ramp up 2 s, cruise 3 s, ramp down 2 s, stand 2 s.
@@ -259,10 +265,12 @@ def evaluate_run(env: RslRlVecEnvWrapper, policy: Callable, speed: float) -> Non
     if 3 <= t < 6:
       velocity = robot.root_link_lin_vel_b[active, :2]
       cruise_samples += velocity.shape[0]
+      forward_speed += velocity[:, 0].sum().item()
       forward_error += (velocity[:, 0] - speed).abs().sum().item()
       sideways_speed += velocity[:, 1].abs().sum().item()
       flight_samples += (contact.current_contact_time[active] == 0).all(dim=1).sum().item()
       stalled_samples += (velocity[:, 0] < 0.5 * speed).sum().item()
+      backward_samples += (velocity[:, 0] < -0.15).sum().item()
       landings, lead = walking_landings(env.unwrapped, feet)
       planted = landings & active[:, None]
       touchdown_count += planted.sum().item()
@@ -276,12 +284,15 @@ def evaluate_run(env: RslRlVecEnvWrapper, policy: Callable, speed: float) -> Non
         f"completed and stopped { (active & stopped).sum().item()}/{env.num_envs}")
   if cruise_samples:
     print(f"[RUN] Surviving cruise samples: {cruise_samples}, "
+          f"mean forward speed {forward_speed / cruise_samples:.3f} m/s, "
           f"forward MAE {forward_error / cruise_samples:.3f} m/s, "
           f"mean lateral speed {sideways_speed / cruise_samples:.3f} m/s, "
           f"both feet airborne {flight_samples / cruise_samples:.1%}")
-    print(f"[RUN] Below half commanded speed {stalled_samples / cruise_samples:.1%}, "
-          f"supported forward steps {touchdown_count / (cruise_samples * dt):.2f}/s")
-    if touchdown_count:
+    if speed > 0:
+      print(f"[RUN] Below half commanded speed {stalled_samples / cruise_samples:.1%}, "
+            f"moving backward above 0.15 m/s {backward_samples / cruise_samples:.1%}, "
+            f"supported forward steps {touchdown_count / (cruise_samples * dt):.2f}/s")
+    if speed > 0 and touchdown_count:
       print(f"[RUN] Mean forward foot separation at landing {total_step_length / touchdown_count:.3f} m")
 
 

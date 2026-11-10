@@ -1,8 +1,8 @@
 # Zlab Cloud
 
 Train Z01 locomotion policies in MuJoCo on a Linux cloud machine with an NVIDIA
-GPU. The repo includes the gym, robot assets, SDK, and a resume checkpoint for
-each of the three walking phases.
+GPU. The repo includes the gym, robot assets, SDK, and resume checkpoints for
+walking, fast walking, stride walking, and Stage 2 robust walking.
 
 ## Setup
 
@@ -35,7 +35,18 @@ From `Zlab_Gym`, choose one phase:
 | Fast walking | `./train_walking.sh --fast 500 64 checkpoints/fast-walking-model_1000.pt` |
 | Stride walking | `./train_walking.sh --stride 500 64 checkpoints/stride-walking-model_1100.pt` |
 
-The first argument after any mode flag is the number of additional PPO
+To start balance recovery from the included Stage 2 checkpoint, run:
+
+```bash
+./train_walking.sh --recovery 1500 64 checkpoints/robust-walking-2-model_6698.pt
+```
+
+This trains on horizontal pushes and roll/pitch disturbances during walking
+and standing. To continue from the latest recovery save, run
+`./train_walking.sh --recovery`. Each run saves every 100 updates and at the end.
+Pass a larger update count after `--recovery` for a longer run.
+
+The first argument after the mode (including the stage number for `--robust`) is the number of additional PPO
 updates. The next is the number of parallel environments. With a new log
 directory, `./train_walking.sh` starts from the bundled Zoomlion walking
 policy. After the first run, omit the checkpoint argument to resume the

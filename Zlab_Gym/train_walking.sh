@@ -3,17 +3,21 @@ set -euo pipefail
 
 cd -- "$(dirname -- "${BASH_SOURCE[0]}")"
 if [[ "${1:-}" == --help || "${1:-}" == -h ]]; then
-    printf '%s\n' "Usage: $0 [--fast | --stride] [updates] [num-envs] [checkpoint]" \
+    printf '%s\n' "Usage: $0 [--fast | --stride | --long-stride | --robust STAGE | --recovery] [updates] [num-envs] [checkpoint]" \
         'Fine-tune the bundled Zoomlion walking actor for 500 updates with 64 environments.' \
         'By default, resume the furthest usable checkpoint from the walking experiment.' \
         'Use --fast to build on a walking checkpoint and practice speeds up to 1.6 m/s.' \
-        'Use --stride to build on a fast-walking checkpoint and practice longer, quicker steps.'
+        'Use --stride to build on a fast-walking checkpoint and practice longer, quicker steps.' \
+        'Use --long-stride to continue a stride checkpoint with longer steps and quicker swings.' \
+        'Use --robust 1, 2, or 3 to train with friction and damping, pushes, then uneven ground.' \
+        'Use --recovery to continue stage 2 with balance recovery practice for 1,500 updates.'
     exit 0
 fi
 
 task=Z01-StdAddHead-Velocity-Walk
 run_name=walking
 experiments=(z01_walking)
+default_updates=500
 if [[ "${1:-}" == --fast ]]; then
     shift
     task=Z01-StdAddHead-Velocity-FastWalk
@@ -24,12 +28,38 @@ elif [[ "${1:-}" == --stride ]]; then
     task=Z01-StdAddHead-Velocity-StrideWalk
     run_name=stride-walking
     experiments=(z01_stride_walking z01_fast_walking)
+elif [[ "${1:-}" == --long-stride ]]; then
+    shift
+    task=Z01-StdAddHead-Velocity-LongStrideWalk
+    run_name=long-stride-walking
+    experiments=(z01_long_stride_walking z01_stride_walking)
+elif [[ "${1:-}" == --robust ]]; then
+    stage="${2:-}"
+    if [[ ! "$stage" =~ ^[123]$ ]]; then
+        printf 'Robust stage must be 1, 2, or 3.\n' >&2
+        exit 2
+    fi
+    shift 2
+    task="Z01-StdAddHead-Velocity-RobustWalk$stage"
+    run_name="robust-walking-$stage"
+    experiments=("z01_robust_walking_$stage")
+    if [[ "$stage" == 1 ]]; then
+        experiments+=(z01_stride_walking)
+    else
+        experiments+=("z01_robust_walking_$((stage - 1))")
+    fi
+elif [[ "${1:-}" == --recovery ]]; then
+    shift
+    task=Z01-StdAddHead-Velocity-BalanceRecovery
+    run_name=balance-recovery
+    experiments=(z01_balance_recovery z01_robust_walking_2)
+    default_updates=1500
 fi
 
-updates="${1:-500}"
+updates="${1:-$default_updates}"
 num_envs="${2:-64}"
 if (( $# > 3 )) || [[ ! "$updates" =~ ^[1-9][0-9]*$ || ! "$num_envs" =~ ^[1-9][0-9]*$ ]]; then
-    printf 'Usage: %s [--fast | --stride] [updates] [num-envs] [checkpoint]\n' "$0" >&2
+    printf 'Usage: %s [--fast | --stride | --long-stride | --robust STAGE | --recovery] [updates] [num-envs] [checkpoint]\n' "$0" >&2
     exit 2
 fi
 

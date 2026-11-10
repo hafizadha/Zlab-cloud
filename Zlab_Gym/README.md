@@ -101,6 +101,38 @@ task plays at a fixed 1.35 m/s command and saves in
 the commanded speed, forward foot separation at landing, and supported
 steps per second alongside completion and stopping results.
 
+Run `./train_walking.sh --long-stride` to continue from a stride-walking
+checkpoint with forward commands up to 1.8 m/s, a longer foot placement
+target, and a 0.19 s swing target. Pass a checkpoint as the third argument
+to start from a specific save. The new checkpoints live under
+`logs/rsl_rl/z01_long_stride_walking/`. Use
+`Z01-StdAddHead-Velocity-LongStrideWalk` for playback at 1.55 m/s.
+
+Use the robustness stages after establishing a stable fast gait. Each stage
+keeps the stride rewards and resumes the preceding stage on its first run.
+
+| Command | Disturbances |
+| --- | --- |
+| `./train_walking.sh --robust 1` | Flat ground with foot friction 0.5–0.9 and added joint damping 0.05–0.15 |
+| `./train_walking.sh --robust 2` | Wider friction and damping ranges, plus horizontal velocity pushes up to 0.12 m/s per axis every 5–8 seconds |
+| `./train_walking.sh --robust 3` | Gentle heightfield waves with 0.8–2.4 cm amplitude and pushes up to 0.18 m/s per axis |
+
+Pass the update count, number of environments, and optionally a checkpoint
+after the stage number. For example, `./train_walking.sh --robust 1 100 64`
+runs a short first block. Evaluate each save on its own stage and on the flat
+task before advancing. Use task IDs `Z01-StdAddHead-Velocity-RobustWalk1`
+through `Z01-StdAddHead-Velocity-RobustWalk3` with `--eval-run-speed=1.55`.
+Keep motor delays enabled when comparing robustness.
+
+Run `./train_walking.sh --recovery` to fine-tune the Stage 2 policy with
+more standing practice and small roll and pitch perturbations on flat
+ground. The default block is 1,500 updates with 64 environments. The
+policy receives a penalty for backward velocity above 0.15 m/s while
+commanded forward. Checkpoints save under `logs/rsl_rl/z01_balance_recovery/`.
+Evaluate both the Stage 2 and recovery checkpoints with
+`Z01-StdAddHead-Velocity-BalanceRecovery` and `--eval-run-speed=0` for
+standing recovery or `--eval-run-speed=1.55` for walking recovery.
+
 For straight-line running practice, run `./train_human_run.sh`. It resumes
 the furthest saved running checkpoint, or initializes from the bundled walking
 policy when no running checkpoints exist. It trains for 500 additional updates with 64

@@ -8,7 +8,10 @@ from .env_cfgs import (
     z01_std_add_head_rough_env_cfg,
 )
 from .rl_cfg import z01_std_add_head_velocity_ppo_runner_cfg
-from .running import RunningOnPolicyRunner, running_env_cfg, stride_env_cfg, walking_env_cfg
+from .running import (
+    RunningOnPolicyRunner, balance_recovery_env_cfg, robust_stride_env_cfg,
+    running_env_cfg, stride_env_cfg, walking_env_cfg,
+)
 
 register_mjlab_task(
     task_id="Z01-StdAddHead-Velocity-Rough",
@@ -65,5 +68,30 @@ register_mjlab_task(
     env_cfg=stride_env_cfg(),
     play_env_cfg=stride_env_cfg(play=True),
     rl_cfg=replace(walking_rl_cfg, experiment_name="z01_stride_walking"),
+    runner_cls=RunningOnPolicyRunner,
+)
+
+register_mjlab_task(
+    task_id="Z01-StdAddHead-Velocity-LongStrideWalk",
+    env_cfg=stride_env_cfg(longer=True),
+    play_env_cfg=stride_env_cfg(play=True, longer=True),
+    rl_cfg=replace(walking_rl_cfg, experiment_name="z01_long_stride_walking"),
+    runner_cls=RunningOnPolicyRunner,
+)
+
+for stage in (1, 2, 3):
+    register_mjlab_task(
+        task_id=f"Z01-StdAddHead-Velocity-RobustWalk{stage}",
+        env_cfg=robust_stride_env_cfg(stage),
+        play_env_cfg=robust_stride_env_cfg(stage, play=True),
+        rl_cfg=replace(walking_rl_cfg, experiment_name=f"z01_robust_walking_{stage}"),
+        runner_cls=RunningOnPolicyRunner,
+    )
+
+register_mjlab_task(
+    task_id="Z01-StdAddHead-Velocity-BalanceRecovery",
+    env_cfg=balance_recovery_env_cfg(),
+    play_env_cfg=balance_recovery_env_cfg(play=True),
+    rl_cfg=replace(walking_rl_cfg, experiment_name="z01_balance_recovery"),
     runner_cls=RunningOnPolicyRunner,
 )
