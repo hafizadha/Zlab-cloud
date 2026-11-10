@@ -45,6 +45,10 @@ elif [[ "${1:-}" == --robust ]]; then
     experiments=("z01_robust_walking_$stage")
     if [[ "$stage" == 1 ]]; then
         experiments+=(z01_stride_walking)
+    elif [[ "$stage" == 2 ]]; then
+        # Prefer a Stage 2 save before looking at Stage 1 runs.
+        bundled_checkpoint=checkpoints/robust-walking-2-model_6698.pt
+        experiments+=(z01_robust_walking_1)
     else
         experiments+=("z01_robust_walking_$((stage - 1))")
     fi
@@ -83,6 +87,11 @@ if [[ -z "$checkpoint" ]]; then
             fi
         done
         if [[ -n "$checkpoint" ]]; then break; fi
+        if [[ "$experiment" == z01_robust_walking_2 && -n "${bundled_checkpoint:-}" ]] &&
+            unzip -tqq "$bundled_checkpoint" >/dev/null 2>&1; then
+            checkpoint="$bundled_checkpoint"
+            break
+        fi
     done
 fi
 if [[ -n "$checkpoint" ]]; then

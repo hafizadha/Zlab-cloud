@@ -2,13 +2,15 @@
 
 Train Z01 locomotion policies in MuJoCo on a Linux cloud machine with an NVIDIA
 GPU. The repo includes the gym, robot assets, SDK, and resume checkpoints for
-walking, fast walking, stride walking, and Stage 2 robust walking.
+walking, fast walking, stride walking, and Stages 1 and 2 of robust walking.
 
 ## Setup
 
 On a GPU instance with a working NVIDIA driver and Python 3.10 or 3.11, run:
 
 ```bash
+# Ubuntu or Debian, if unzip or flock is missing
+sudo apt-get install -y unzip util-linux
 nvidia-smi
 cd Zlab_Gym
 python3 -m venv ../.venv
@@ -25,7 +27,30 @@ last check reports CUDA unavailable. The MuJoCo and Warp versions are pinned
 in [setup.py](Zlab_Gym/setup.py). Set `ZLAB_PYTHON` to a Python executable if
 you want to run the launcher from a different environment.
 
-## Training
+## Stage 2 robust walking
+
+After setup, run this from `Zlab_Gym`:
+
+```bash
+./train_walking.sh --robust 2 1500 64
+```
+
+This runs 1,500 additional PPO updates with 64 parallel environments. It resumes
+the latest usable Stage 2 save in the log directory, or starts from the bundled
+Stage 2 checkpoint `model_6698.pt` on a fresh instance. Stage 2 varies foot
+friction and joint damping and applies horizontal pushes on flat ground.
+Use the same command to continue, and increase the update count for a longer run.
+Checkpoints save every 100 updates and at the end under
+`logs/rsl_rl/z01_robust_walking_2/`. Set `ZLAB_LOG_ROOT` to an absolute path on
+persistent storage to keep saves across instance restarts.
+
+To replay Stage 2 training from the bundled Stage 1 checkpoint:
+
+```bash
+./train_walking.sh --robust 2 1500 64 checkpoints/robust-walking-1-model_6199.pt
+```
+
+## Other training modes
 
 From `Zlab_Gym`, choose one phase:
 
