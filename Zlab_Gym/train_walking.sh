@@ -47,7 +47,7 @@ elif [[ "${1:-}" == --robust ]]; then
         experiments+=(z01_stride_walking)
     elif [[ "$stage" == 2 ]]; then
         # Prefer a Stage 2 save before looking at Stage 1 runs.
-        bundled_checkpoint=checkpoints/robust-walking-2-model_6698.pt
+        bundled_checkpoint=checkpoints/robust-walking-2-model_7300.pt
         experiments+=(z01_robust_walking_1)
     else
         experiments+=("z01_robust_walking_$((stage - 1))")
@@ -119,6 +119,10 @@ if [[ -z "$python_bin" ]]; then
         python_bin=python
     fi
 fi
+gpu_args=()
+if [[ "${ZLAB_USE_ALL_GPUS:-0}" == 1 ]]; then
+    gpu_args=(--gpu-ids all)
+fi
 exec "$python_bin" -u scripts/train.py "$task" \
-    "${start_args[@]}" --log-root="$log_root" --env.scene.num-envs="$num_envs" \
+    "${gpu_args[@]}" "${start_args[@]}" --log-root="$log_root" --env.scene.num-envs="$num_envs" \
     --agent.max-iterations="$updates" --agent.save-interval=100 --agent.run-name="$run_name"

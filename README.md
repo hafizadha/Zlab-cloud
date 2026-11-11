@@ -27,6 +27,16 @@ last check reports CUDA unavailable. The MuJoCo and Warp versions are pinned
 in [setup.py](Zlab_Gym/setup.py). Set `ZLAB_PYTHON` to a Python executable if
 you want to run the launcher from a different environment.
 
+## Kaggle with two T4 GPUs
+
+Import [the Stage 2 notebook](kaggle/robust_walking_2_t4x2.ipynb) into Kaggle
+and set **Accelerator** to **GPU T4 x2** and **Internet** to **On**. Keep the
+notebook private and add a Kaggle Secret named `ZLAB_GITHUB_TOKEN` with read
+access to this repository. The notebook installs dependencies, checks that both
+GPUs can run a one-update smoke test, and trains from the included Stage 2
+checkpoint. Use **Save Version → Save & Run All** to keep the run outputs.
+Checkpoints and TensorBoard logs go to `/kaggle/working/zlab-training`.
+
 ## Stage 2 robust walking
 
 After setup, run this from `Zlab_Gym`:
@@ -37,7 +47,7 @@ After setup, run this from `Zlab_Gym`:
 
 This runs 1,500 additional PPO updates with 64 parallel environments. It resumes
 the latest usable Stage 2 save in the log directory, or starts from the bundled
-Stage 2 checkpoint `model_6698.pt` on a fresh instance. Stage 2 varies foot
+Stage 2 checkpoint `model_7300.pt` on a fresh instance. Stage 2 varies foot
 friction and joint damping and applies horizontal pushes on flat ground.
 Use the same command to continue, and increase the update count for a longer run.
 Checkpoints save every 100 updates and at the end under

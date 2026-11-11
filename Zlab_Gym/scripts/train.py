@@ -164,7 +164,7 @@ def run_train(task_id: str, cfg: TrainConfig, log_dir: Path) -> None:
     runner.add_git_repo_to_log(__file__)
     if resume_path is not None:
         print(f"[INFO]: Loading model checkpoint from: {resume_path}")
-        runner.load(str(resume_path))
+        runner.load(str(resume_path), map_location="cpu")
     elif cfg.warm_start_walking:
         from src.tasks.soccer.walking import initialize_walking_actor
 
@@ -234,7 +234,8 @@ def launch_training(task_id: str, args: TrainConfig | None = None):
             hostnames=["localhost"],
             workers_per_host=num_gpus,
             backend=None,  # Let rsl_rl handle process group initialization.
-            copy_env_vars=torchrunx.DEFAULT_ENV_VARS_FOR_COPY + ("MUJOCO*",),
+            copy_env_vars=torchrunx.DEFAULT_ENV_VARS_FOR_COPY
+            + ("MUJOCO*", "WARP*", "MJLAB_WARP_QUIET", "OMP_NUM_THREADS"),
         ).run(run_train, task_id, args, log_dir)
 
 
