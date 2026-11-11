@@ -27,14 +27,14 @@ last check reports CUDA unavailable. The MuJoCo and Warp versions are pinned
 in [setup.py](Zlab_Gym/setup.py). Set `ZLAB_PYTHON` to a Python executable if
 you want to run the launcher from a different environment.
 
-## Kaggle with two T4 GPUs
+## Kaggle
 
-Import [the Stage 2 notebook](kaggle/robust_walking_2_t4x2.ipynb) into Kaggle
+Import [the Stage 2 notebook](kaggle/robust_walking_2.ipynb) into Kaggle
 and set **Accelerator** to **GPU T4 x2** and **Internet** to **On**. Keep the
 notebook private and add a Kaggle Secret named `ZLAB_GITHUB_TOKEN` with read
-access to this repository. The notebook installs dependencies, checks that both
-GPUs can run a one-update smoke test, and trains from the included Stage 2
-checkpoint. Use **Save Version → Save & Run All** to keep the run outputs.
+access to this repository. The notebook installs dependencies and runs a
+one-update smoke test on the first T4 before starting training from the
+included Stage 2 checkpoint. Use **Save Version → Save & Run All** to keep the run outputs.
 The notebook saves checkpoints every 500 updates and at the end. Checkpoints
 and TensorBoard logs go to `/kaggle/working/zlab-training`.
 
