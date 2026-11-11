@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 import git
+import json
 import os
 import pathlib
 import statistics
@@ -272,7 +273,11 @@ class Logger:
                 f"""{"Time elapsed:":>{pad}} {time.strftime("%H:%M:%S", time.gmtime(self.tot_time))}\n"""
                 f"""{"ETA:":>{pad}} {time.strftime("%H:%M:%S", time.gmtime(eta))}\n"""
             )
-            print(log_string)
+            if os.environ.get("ZLAB_NOTEBOOK_PROGRESS") == "1":
+                summary = log_string.replace("\033[1m", "").replace("\033[0m", "")
+                print("ZLAB_PPO_SUMMARY " + json.dumps(summary), flush=True)
+            else:
+                print(log_string)
 
             # Upload available videos
             if self.logger_type == "wandb":

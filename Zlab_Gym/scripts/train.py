@@ -235,7 +235,7 @@ def launch_training(task_id: str, args: TrainConfig | None = None):
             workers_per_host=num_gpus,
             backend=None,  # Let rsl_rl handle process group initialization.
             copy_env_vars=torchrunx.DEFAULT_ENV_VARS_FOR_COPY
-            + ("MUJOCO*", "WARP*", "MJLAB_WARP_QUIET", "OMP_NUM_THREADS"),
+            + ("MUJOCO*", "WARP*", "MJLAB_WARP_QUIET", "OMP_NUM_THREADS", "ZLAB_NOTEBOOK_PROGRESS"),
         ).run(run_train, task_id, args, log_dir)
 
 
