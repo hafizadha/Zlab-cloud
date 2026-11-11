@@ -35,7 +35,8 @@ notebook private and add a Kaggle Secret named `ZLAB_GITHUB_TOKEN` with read
 access to this repository. The notebook installs dependencies, checks that both
 GPUs can run a one-update smoke test, and trains from the included Stage 2
 checkpoint. Use **Save Version → Save & Run All** to keep the run outputs.
-Checkpoints and TensorBoard logs go to `/kaggle/working/zlab-training`.
+The notebook saves checkpoints every 500 updates and at the end. Checkpoints
+and TensorBoard logs go to `/kaggle/working/zlab-training`.
 
 ## Stage 2 robust walking
 

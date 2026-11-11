@@ -62,6 +62,11 @@ fi
 
 updates="${1:-$default_updates}"
 num_envs="${2:-64}"
+save_interval="${ZLAB_SAVE_INTERVAL:-100}"
+if [[ ! "$save_interval" =~ ^[1-9][0-9]*$ ]]; then
+    printf 'ZLAB_SAVE_INTERVAL must be a positive integer.\n' >&2
+    exit 2
+fi
 if (( $# > 3 )) || [[ ! "$updates" =~ ^[1-9][0-9]*$ || ! "$num_envs" =~ ^[1-9][0-9]*$ ]]; then
     printf 'Usage: %s [--fast | --stride | --long-stride | --robust STAGE | --recovery] [updates] [num-envs] [checkpoint]\n' "$0" >&2
     exit 2
@@ -125,4 +130,4 @@ if [[ "${ZLAB_USE_ALL_GPUS:-0}" == 1 ]]; then
 fi
 exec "$python_bin" -u scripts/train.py "$task" \
     "${gpu_args[@]}" "${start_args[@]}" --log-root="$log_root" --env.scene.num-envs="$num_envs" \
-    --agent.max-iterations="$updates" --agent.save-interval=100 --agent.run-name="$run_name"
+    --agent.max-iterations="$updates" --agent.save-interval="$save_interval" --agent.run-name="$run_name"
