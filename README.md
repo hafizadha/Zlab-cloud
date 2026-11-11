@@ -32,9 +32,9 @@ you want to run the launcher from a different environment.
 Import [the Stage 2 notebook](kaggle/robust_walking_2.ipynb) into Kaggle
 and set **Accelerator** to **GPU T4 x2** and **Internet** to **On**. Keep the
 notebook private and add a Kaggle Secret named `ZLAB_GITHUB_TOKEN` with read
-access to this repository. The notebook installs dependencies and runs a
-one-update smoke test on the first T4 before starting training from the
-included Stage 2 checkpoint. Use **Save Version → Save & Run All** to keep the run outputs.
+access to this repository. The notebook runs one PPO worker on each T4 with
+1,025 environments per worker, for 2,050 total. It runs a one-update smoke
+test at that size before starting training from the included Stage 2 checkpoint. Use **Save Version → Save & Run All** to keep the run outputs.
 The notebook saves checkpoints every 500 updates and at the end. Checkpoints
 and TensorBoard logs go to `/kaggle/working/zlab-training`.
 
