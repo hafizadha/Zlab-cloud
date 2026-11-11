@@ -1,55 +1,49 @@
-# Zlab Cloud · Stage 3 robust walking
+# Zlab Cloud · Ball sprint
 
-Fine-tune the Z01 on gentle heightfield waves with amplitudes of 0.8–2.4 cm.
-Stage 3 varies foot friction from 0.3 to 1.1 and added joint damping from
-0.05 to 0.30. It applies horizontal velocity pushes up to 0.18 m/s per axis
-every 5–8 seconds. Training commands go up to 1.8 m/s.
+Fine-tune the Z01 to turn toward a randomly placed ball, sprint, and brake
+to a stable stop nearby. The ball starts 4–11 m away and can appear in any
+direction. Simulated ball position drives the policy's existing forward-speed
+and yaw commands. Training commands range up to 3.0 m/s, with lower speeds
+during turns and near the ball.
 
-Stage 3 keeps the robot facing world +X through the existing yaw command. During forward walking it penalizes heading error and world-frame lateral speed above 0.04 m/s, leaving room for small balance corrections. Evaluation reports world-frame sideways drift and heading error alongside the usual walking and stopping metrics.
+The rewards favor closing distance, staying upright, alternating footfalls,
+and brief airborne phases while moving forward. An arrival requires the
+robot to be 0.45–0.90 m from the ball and moving below 0.25 m/s. The bundled
+`model_15000.pt` is the starting locomotion checkpoint.
 
-The bundled Stage 2 checkpoint `model_10400.pt` supplies the initial policy
-and optimizer state. A new run starts from it. Later runs in the same log
-directory automatically resume the highest valid Stage 3 checkpoint.
+## Train on Linux
 
-## Kaggle
-
-1. Import the [Stage 3 notebook](kaggle/robust_walking_3.ipynb). Keep it private and select **GPU T4 x2** and **Internet On**.
-2. Add and enable a Kaggle Secret named `ZLAB_GITHUB_TOKEN` with read access to this repository.
-3. Run the setup and smoke-test cells, then start training. Use **Save Version → Save & Run All** to retain the run outputs.
-
-The notebook defaults to 1,500 additional PPO updates and 1,025 environments per
-GPU (2,050 total). The smoke test checks both GPUs at that size. Checkpoints save
-every 500 iterations and at the end, under
-`/kaggle/working/zlab-stage3/rsl_rl/z01_robust_walking_3/`. To resume in a new
-session, attach the previous notebook's output and set `RESUME_CHECKPOINT`
-to its `.pt` file under `/kaggle/input`.
-
-## Linux with one NVIDIA GPU
-
-From the repository root, use Python 3.10–3.13 and a CUDA-enabled PyTorch build.
-The launcher needs `flock` and `unzip`.
+Use Python 3.10–3.13, CUDA-enabled PyTorch, `flock`, and `unzip`. From the repo root, run
 
 ```bash
 cd Zlab_Gym
 python -m pip install -e . onnx
-./train_stage3.sh 1500 64
+./train_ball_sprint.sh 4500 64
 ```
 
-The arguments are additional PPO updates, environments per GPU, and an optional
-checkpoint path. Set `ZLAB_LOG_ROOT` to an absolute path on persistent storage
-to save logs outside the checkout.
+The third argument optionally selects an explicit checkpoint. Otherwise the
+launcher uses the latest valid ball-sprint save in the log directory, or
+`model_15000.pt` for a fresh run. Set `ZLAB_LOG_ROOT` to an absolute path to
+use persistent storage.
 
-## Evaluate a checkpoint
-
-Run 100 seeded trials with a stand, acceleration, cruise, braking, and stop
-sequence on Stage 3 terrain. The evaluator reports upright and clean-stop
-counts, speed tracking, stalls, and step measurements.
+For Kaggle with two T4s, run the same script from `Zlab_Gym` after setup.
 
 ```bash
-python scripts/play.py --checkpoint-file checkpoints/model_10400.pt \
-  --eval-run-speed 1.55 --num-envs 100 --device cuda:0 --seed 2026
+ZLAB_USE_ALL_GPUS=1 ZLAB_LOG_ROOT=/kaggle/working/zlab-ball-sprint \
+  ./train_ball_sprint.sh 4500 1025
 ```
 
-Use the same command with the new Stage 3 checkpoint to compare it against the
-starting policy. Omit `--eval-run-speed` and use one environment for interactive
-playback.
+The environment count is per GPU. Checkpoints save every 500 updates and
+at the end under the selected log directory.
+
+## Evaluate
+
+```bash
+python scripts/play.py --checkpoint-file /path/to/model.pt \
+  --eval-episodes 100 --num-envs 16 --device cuda:0 --seed 2026
+```
+
+The evaluator counts clean arrivals, falls, and successful approaches with
+at least three qualifying flight samples and a peak forward speed of at
+least 2.0 m/s. It also reports mean peak speed. Omit `--eval-episodes` for
+interactive playback.
