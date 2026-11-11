@@ -5,6 +5,8 @@ Stage 3 varies foot friction from 0.3 to 1.1 and added joint damping from
 0.05 to 0.30. It applies horizontal velocity pushes up to 0.18 m/s per axis
 every 5–8 seconds. Training commands go up to 1.8 m/s.
 
+Stage 3 keeps the robot facing world +X through the existing yaw command. During forward walking it penalizes heading error and world-frame lateral speed above 0.04 m/s, leaving room for small balance corrections. Evaluation reports world-frame sideways drift and heading error alongside the usual walking and stopping metrics.
+
 The bundled Stage 2 checkpoint `model_10400.pt` supplies the initial policy
 and optimizer state. A new run starts from it. Later runs in the same log
 directory automatically resume the highest valid Stage 3 checkpoint.

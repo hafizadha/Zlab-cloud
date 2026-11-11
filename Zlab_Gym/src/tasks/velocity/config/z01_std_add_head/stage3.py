@@ -104,11 +104,34 @@ def walking_stride(env, asset_cfg: SceneEntityCfg, step_time: float = 0.33,
     return (command > 0.3) * (landings * length_score * swing_score).sum(dim=1)
 
 
+def walking_sideways_cost(env):
+    """Penalize world-frame sideways velocity beyond small balance corrections."""
+    forward_command = env.command_manager.get_command("twist")[:, 0]
+    lateral_speed = env.scene["robot"].data.root_link_lin_vel_w[:, 1].abs()
+    excess_speed = (lateral_speed - 0.04).clamp_min(0.0)
+    return (forward_command > 0.1) * (excess_speed / 0.25).square().clamp_max(1.0)
+
+
+def walking_heading_cost(env):
+    """Keep the base facing world +X during commanded walking."""
+    forward_command = env.command_manager.get_command("twist")[:, 0]
+    heading = env.scene["robot"].data.heading_w
+    return (forward_command > 0.1) * (1.0 - torch.exp(-(heading / 0.35).square()))
+
+
 def stage3_env_cfg(play: bool = False):
     cfg = _walking_env_cfg(play)
+    # Use the existing yaw-command channel to steer back toward world +X.
+    command = cfg.commands["twist"]
+    command.heading_command = True
+    command.ranges.heading = (0.0, 0.0)
+    command.rel_heading_envs = 1.0
+    command.heading_control_stiffness = 1.0
+    command.ranges.ang_vel_z = (-0.4, 0.4)
+    cfg.rewards["walking_sideways"] = RewardTermCfg(func=walking_sideways_cost, weight=-1.0)
+    cfg.rewards["walking_heading"] = RewardTermCfg(func=walking_heading_cost, weight=-1.5)
     if play:
         # Keep the forward command constant in interactive playback.
-        command = cfg.commands["twist"]
         command.ranges.lin_vel_x = (1.55, 1.55)
         command.rel_standing_envs = 0.0
     cfg.rewards["walking_stall"] = RewardTermCfg(func=walking_stall, weight=-2.0)

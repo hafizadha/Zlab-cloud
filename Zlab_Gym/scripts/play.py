@@ -80,6 +80,9 @@ def evaluate_run(env: RslRlVecEnvWrapper, policy: Callable, speed: float) -> Non
   command = env.unwrapped.command_manager.get_command("twist")
   active = torch.ones(env.num_envs, dtype=torch.bool, device=command.device)
   robot = scene["robot"].data
+  start_y = robot.root_link_pos_w[:, 1].clone()
+  peak_drift = torch.zeros_like(start_y)
+  world_lateral_speed = heading_error = 0.0
   contact = scene["feet_ground_contact"].data
   dt = env.unwrapped.step_dt
   cruise_samples = 0
@@ -96,6 +99,8 @@ def evaluate_run(env: RslRlVecEnvWrapper, policy: Callable, speed: float) -> Non
       forward_speed += velocity[:, 0].sum().item()
       forward_error += (velocity[:, 0] - speed).abs().sum().item()
       sideways_speed += velocity[:, 1].abs().sum().item()
+      world_lateral_speed += robot.root_link_lin_vel_w[active, 1].abs().sum().item()
+      heading_error += robot.heading_w[active].abs().rad2deg().sum().item()
       flight_samples += (contact.current_contact_time[active] == 0).all(dim=1).sum().item()
       stalled_samples += (velocity[:, 0] < 0.5 * speed).sum().item()
       backward_samples += (velocity[:, 0] < -0.15).sum().item()
@@ -105,6 +110,8 @@ def evaluate_run(env: RslRlVecEnvWrapper, policy: Callable, speed: float) -> Non
       total_step_length += lead[planted].sum().item()
     _, _, done, _ = env.step(policy(env.get_observations()))
     active &= ~done.bool()
+    drift = (robot.root_link_pos_w[:, 1] - start_y).abs()
+    peak_drift[active] = torch.maximum(peak_drift[active], drift[active])
     if not active.any():
       break
   stopped = robot.root_link_lin_vel_b[:, :2].norm(dim=1) < 0.15
@@ -116,6 +123,12 @@ def evaluate_run(env: RslRlVecEnvWrapper, policy: Callable, speed: float) -> Non
           f"forward MAE {forward_error / cruise_samples:.3f} m/s, "
           f"mean lateral speed {sideways_speed / cruise_samples:.3f} m/s, "
           f"both feet airborne {flight_samples / cruise_samples:.1%}")
+    print(f"[RUN] World-frame mean lateral speed {world_lateral_speed / cruise_samples:.3f} m/s, "
+          f"mean absolute heading error {heading_error / cruise_samples:.1f} deg")
+  if active.any():
+    print(f"[RUN] Completed trials: mean final sideways drift {drift[active].mean().item():.3f} m, "
+          f"mean peak sideways drift {peak_drift[active].mean().item():.3f} m")
+  if cruise_samples:
     if speed > 0:
       print(f"[RUN] Below half commanded speed {stalled_samples / cruise_samples:.1%}, "
             f"moving backward above 0.15 m/s {backward_samples / cruise_samples:.1%}, "
