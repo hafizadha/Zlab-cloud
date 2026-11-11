@@ -45,8 +45,12 @@ gpu_args=()
 if [[ "${ZLAB_USE_ALL_GPUS:-0}" == 1 ]]; then
     gpu_args=(--gpu-ids all)
 fi
-exec "${ZLAB_PYTHON:-python}" -u scripts/train.py Z01-StdAddHead-Velocity-RobustWalk3 \
+"${ZLAB_PYTHON:-python}" -u scripts/train.py Z01-StdAddHead-Velocity-RobustWalk3 \
     "${gpu_args[@]}" --agent.resume True --agent.load-checkpoint="$checkpoint" \
     --log-root="$log_root" --env.scene.num-envs="$num_envs" \
     --agent.max-iterations="$updates" --agent.save-interval="$save_interval" \
-    --agent.run-name=robust-walking-3
+    --agent.run-name=robust-walking-3 2>&1 | awk '
+        /height field collision overflow, number of collisions >= [0-9]+ - please adjust resolution:/ { next }
+        /decrease the number of hfield rows\/cols or modify size of colliding geom[[:space:]]*$/ { next }
+        { print; fflush() }
+    '

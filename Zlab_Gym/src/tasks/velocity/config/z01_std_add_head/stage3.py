@@ -143,6 +143,8 @@ def stage3_env_cfg(play: bool = False):
             "gentle_waves": HfWaveTerrainCfg(
                 amplitude_range=(0.008, 0.024),
                 num_waves=4,
+                # Coarser cells reduce the contacts generated per geom pair.
+                horizontal_scale=0.2,
                 vertical_scale=0.002,
                 border_width=0.2,
             ),
