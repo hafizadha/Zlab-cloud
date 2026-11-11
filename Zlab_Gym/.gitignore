@@ -6,3 +6,5 @@ wandb
 MUJOCO_LOG.TXT
 *.pyc
 *.pkl
+
+torchrunx_logs/

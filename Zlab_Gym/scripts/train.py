@@ -22,12 +22,12 @@ from mjlab.utils.wrappers import VideoRecorder
 from mjlab.utils.torch import configure_torch_backends
 from mjlab.utils.os import dump_yaml, get_checkpoint_path
 from mjlab.utils.gpu import select_gpus
-from mjlab.tasks.tracking.mdp import MotionCommandCfg
 from mjlab.tasks.registry import list_tasks, load_env_cfg, load_rl_cfg, load_runner_cls
 from mjlab.rl import MjlabOnPolicyRunner, RslRlBaseRunnerCfg, RslRlVecEnvWrapper
 from mjlab.envs import ManagerBasedRlEnv, ManagerBasedRlEnvCfg
+import mjlab
 import tyro
-from typing import Literal, cast
+from typing import Literal
 from pathlib import Path
 from datetime import datetime
 from dataclasses import asdict, dataclass, field
@@ -43,8 +43,6 @@ os.environ.setdefault("MUJOCO_GL", "egl")
 class TrainConfig:
     env: ManagerBasedRlEnvCfg
     agent: RslRlBaseRunnerCfg
-    motion_file: str | None = None
-    warm_start_walking: bool = False
     video: bool = False
     video_length: int = 200
     video_interval: int = 2000
@@ -78,35 +76,12 @@ def run_train(task_id: str, cfg: TrainConfig, log_dir: Path) -> None:
         # Set seed to have diversity in different processes.
         seed = cfg.agent.seed + local_rank
 
-    running_task = task_id == "Z01-StdAddHead-Velocity-Run"
-    walking_task = task_id == "Z01-StdAddHead-Velocity-Walk"
-    supports_walking_init = walking_task or running_task or task_id.startswith("Z01-StdAddHead-Soccer-")
-    if cfg.warm_start_walking and (not supports_walking_init or cfg.agent.resume):
-        raise ValueError("--warm-start-walking requires a new soccer, velocity-run, or velocity-walk run.")
-
     configure_torch_backends()
 
     cfg.agent.seed = seed
     cfg.env.seed = seed
 
     print(f"[INFO] Training with: device={device}, seed={seed}, rank={rank}")
-
-    # Check if this is a tracking task by checking for motion command.
-    is_tracking_task = "motion" in cfg.env.commands and isinstance(
-        cfg.env.commands["motion"], MotionCommandCfg
-    )
-
-    if is_tracking_task:
-        if not cfg.motion_file:
-            raise ValueError(
-                "For tracking tasks, --motion-file must be set ...")
-        motion_path = Path(cfg.motion_file).expanduser().resolve()
-        if not motion_path.exists():
-            raise FileNotFoundError(f"Motion file not found: {motion_path}")
-        motion_cmd = cfg.env.commands["motion"]
-        assert isinstance(motion_cmd, MotionCommandCfg)
-        motion_cmd.motion_file = str(motion_path)
-        print(f"[INFO] Using motion file: {motion_cmd.motion_file}")
 
     # Enable NaN guard if requested.
     if cfg.enable_nan_guard:
@@ -165,12 +140,6 @@ def run_train(task_id: str, cfg: TrainConfig, log_dir: Path) -> None:
     if resume_path is not None:
         print(f"[INFO]: Loading model checkpoint from: {resume_path}")
         runner.load(str(resume_path), map_location="cpu")
-    elif cfg.warm_start_walking:
-        from src.tasks.soccer.walking import initialize_walking_actor
-
-        extra_inputs = 0 if walking_task else 2 if running_task else 8
-        initialize_walking_actor(runner.alg.get_policy(), extra_inputs=extra_inputs)
-        print("[INFO] Initialized the actor from the bundled walking ONNX.")
 
     # Only write config files from rank 0 to avoid race conditions.
     if rank == 0:
@@ -242,7 +211,6 @@ def launch_training(task_id: str, args: TrainConfig | None = None):
 def main():
     # Parse first argument to choose the task.
     # Import tasks to populate the registry.
-    import mjlab.tasks  # noqa: F401
     import src.tasks
 
     all_tasks = list_tasks()

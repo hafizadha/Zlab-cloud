@@ -1,103 +1,53 @@
-# Zlab Cloud
+# Zlab Cloud · Stage 3 robust walking
 
-Train Z01 locomotion policies in MuJoCo on a Linux cloud machine with an NVIDIA
-GPU. The repo includes the gym, robot assets, SDK, and resume checkpoints for
-walking, fast walking, stride walking, and Stages 1 and 2 of robust walking.
+Fine-tune the Z01 on gentle heightfield waves with amplitudes of 0.8–2.4 cm.
+Stage 3 varies foot friction from 0.3 to 1.1 and added joint damping from
+0.05 to 0.30. It applies horizontal velocity pushes up to 0.18 m/s per axis
+every 5–8 seconds. Training commands go up to 1.8 m/s.
 
-## Setup
-
-On a GPU instance with a working NVIDIA driver and Python 3.10 or 3.11, run:
-
-```bash
-# Ubuntu or Debian, if unzip or flock is missing
-sudo apt-get install -y unzip util-linux
-nvidia-smi
-cd Zlab_Gym
-python3 -m venv ../.venv
-source ../.venv/bin/activate
-python -m pip install --upgrade pip
-python -m pip install -e .
-python -m pip install onnx tensorboard
-python -c 'import torch; assert torch.cuda.is_available(); print(torch.cuda.get_device_name(0))'
-python scripts/list_envs.py
-```
-
-Use a CUDA-enabled PyTorch build compatible with your cloud instance if the
-last check reports CUDA unavailable. The MuJoCo and Warp versions are pinned
-in [setup.py](Zlab_Gym/setup.py). Set `ZLAB_PYTHON` to a Python executable if
-you want to run the launcher from a different environment.
+The bundled Stage 2 checkpoint `model_10400.pt` supplies the initial policy
+and optimizer state. A new run starts from it. Later runs in the same log
+directory automatically resume the highest valid Stage 3 checkpoint.
 
 ## Kaggle
 
-Import [the Stage 2 notebook](kaggle/robust_walking_2.ipynb) into Kaggle
-and set **Accelerator** to **GPU T4 x2** and **Internet** to **On**. Keep the
-notebook private and add a Kaggle Secret named `ZLAB_GITHUB_TOKEN` with read
-access to this repository. The notebook uses the checkout at
-`/kaggle/working/Zlab-cloud` and runs one PPO worker on each T4 with
-1,025 environments per worker, for 2,050 total. It runs a one-update smoke
-test at that size before starting training from the included Stage 2 checkpoint. Use **Save Version → Save & Run All** to keep the run outputs.
-The notebook saves checkpoints every 500 updates and at the end. Checkpoints
-and TensorBoard logs go to `/kaggle/working/zlab-training`.
+1. Import the [Stage 3 notebook](kaggle/robust_walking_3.ipynb). Keep it private and select **GPU T4 x2** and **Internet On**.
+2. Add and enable a Kaggle Secret named `ZLAB_GITHUB_TOKEN` with read access to this repository.
+3. Run the setup and smoke-test cells, then start training. Use **Save Version → Save & Run All** to retain the run outputs.
 
-## Stage 2 robust walking
+The notebook defaults to 1,500 additional PPO updates and 1,025 environments per
+GPU (2,050 total). The smoke test checks both GPUs at that size. Checkpoints save
+every 500 iterations and at the end, under
+`/kaggle/working/zlab-stage3/rsl_rl/z01_robust_walking_3/`. To resume in a new
+session, attach the previous notebook's output and set `RESUME_CHECKPOINT`
+to its `.pt` file under `/kaggle/input`.
 
-After setup, run this from `Zlab_Gym`:
+## Linux with one NVIDIA GPU
 
-```bash
-./train_walking.sh --robust 2 1500 64
-```
-
-This runs 1,500 additional PPO updates with 64 parallel environments. It resumes
-the latest usable Stage 2 save in the log directory, or starts from the bundled
-Stage 2 checkpoint `model_7300.pt` on a fresh instance. Stage 2 varies foot
-friction and joint damping and applies horizontal pushes on flat ground.
-Use the same command to continue, and increase the update count for a longer run.
-Checkpoints save every 100 updates and at the end under
-`logs/rsl_rl/z01_robust_walking_2/`. Set `ZLAB_LOG_ROOT` to an absolute path on
-persistent storage to keep saves across instance restarts.
-
-To replay Stage 2 training from the bundled Stage 1 checkpoint:
+From the repository root, use Python 3.10–3.13 and a CUDA-enabled PyTorch build.
+The launcher needs `flock` and `unzip`.
 
 ```bash
-./train_walking.sh --robust 2 1500 64 checkpoints/robust-walking-1-model_6199.pt
+cd Zlab_Gym
+python -m pip install -e . onnx
+./train_stage3.sh 1500 64
 ```
 
-## Other training modes
+The arguments are additional PPO updates, environments per GPU, and an optional
+checkpoint path. Set `ZLAB_LOG_ROOT` to an absolute path on persistent storage
+to save logs outside the checkout.
 
-From `Zlab_Gym`, choose one phase:
+## Evaluate a checkpoint
 
-| Phase | Resume command |
-| --- | --- |
-| Walking | `./train_walking.sh 500 64 checkpoints/walking-model_499.pt` |
-| Fast walking | `./train_walking.sh --fast 500 64 checkpoints/fast-walking-model_1000.pt` |
-| Stride walking | `./train_walking.sh --stride 500 64 checkpoints/stride-walking-model_1100.pt` |
-
-To start balance recovery from the included Stage 2 checkpoint, run:
+Run 100 seeded trials with a stand, acceleration, cruise, braking, and stop
+sequence on Stage 3 terrain. The evaluator reports upright and clean-stop
+counts, speed tracking, stalls, and step measurements.
 
 ```bash
-./train_walking.sh --recovery 1500 64 checkpoints/robust-walking-2-model_6698.pt
+python scripts/play.py --checkpoint-file checkpoints/model_10400.pt \
+  --eval-run-speed 1.55 --num-envs 100 --device cuda:0 --seed 2026
 ```
 
-This trains on horizontal pushes and roll/pitch disturbances during walking
-and standing. To continue from the latest recovery save, run
-`./train_walking.sh --recovery`. Each run saves every 100 updates and at the end.
-Pass a larger update count after `--recovery` for a longer run.
-
-The first argument after the mode (including the stage number for `--robust`) is the number of additional PPO
-updates. The next is the number of parallel environments. With a new log
-directory, `./train_walking.sh` starts from the bundled Zoomlion walking
-policy. After the first run, omit the checkpoint argument to resume the
-furthest usable save for that phase. Checkpoints and TensorBoard logs are
-written under `Zlab_Gym/logs/rsl_rl/`. Set `ZLAB_LOG_ROOT` to an absolute
-path on persistent cloud storage if the instance disk is temporary.
-
-See [policy phases](Zlab_Gym/POLICY_PHASES.md) for rewards, penalties, and
-measured results, and [the gym README](Zlab_Gym/README.md) for evaluation.
-
-## Upstream sources
-
-| Directory | Upstream and base revision |
-| --- | --- |
-| `Zlab_Gym/` | [Zvalley-Robotics/Zlab_Gym](https://github.com/Zvalley-Robotics/Zlab_Gym), `48a01b6`, plus local training and playback changes |
-| `zv_robot_assets/` | [Zvalley-Robotics/zv_robot_assets](https://github.com/Zvalley-Robotics/zv_robot_assets), `244246c` |
-| `zv_robot_sdk/` | [Zvalley-Robotics/zv_robot_sdk](https://github.com/Zvalley-Robotics/zv_robot_sdk), `4ce4906` |
+Use the same command with the new Stage 3 checkpoint to compare it against the
+starting policy. Omit `--eval-run-speed` and use one environment for interactive
+playback.
