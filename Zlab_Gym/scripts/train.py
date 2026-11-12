@@ -26,6 +26,7 @@ from mjlab.tasks.registry import list_tasks, load_env_cfg, load_rl_cfg, load_run
 from mjlab.rl import MjlabOnPolicyRunner, RslRlBaseRunnerCfg, RslRlVecEnvWrapper
 from mjlab.envs import ManagerBasedRlEnv, ManagerBasedRlEnvCfg
 import mjlab
+import torch
 import tyro
 from typing import Literal
 from pathlib import Path
@@ -43,6 +44,7 @@ os.environ.setdefault("MUJOCO_GL", "egl")
 class TrainConfig:
     env: ManagerBasedRlEnvCfg
     agent: RslRlBaseRunnerCfg
+    init_actor_checkpoint: Path | None = None
     video: bool = False
     video_length: int = 200
     video_interval: int = 2000
@@ -62,6 +64,9 @@ class TrainConfig:
 
 
 def run_train(task_id: str, cfg: TrainConfig, log_dir: Path) -> None:
+    if cfg.init_actor_checkpoint is not None and cfg.agent.resume:
+        raise ValueError("--init-actor-checkpoint and --agent.resume are mutually exclusive.")
+
     cuda_visible = os.environ.get("CUDA_VISIBLE_DEVICES", "")
     if cuda_visible == "":
         device = "cpu"
@@ -140,6 +145,11 @@ def run_train(task_id: str, cfg: TrainConfig, log_dir: Path) -> None:
     if resume_path is not None:
         print(f"[INFO]: Loading model checkpoint from: {resume_path}")
         runner.load(str(resume_path), map_location="cpu")
+    elif cfg.init_actor_checkpoint is not None:
+        checkpoint = cfg.init_actor_checkpoint.expanduser().resolve(strict=True)
+        state = torch.load(checkpoint, map_location="cpu", weights_only=True)
+        runner.alg.get_policy().load_state_dict(state["actor_state_dict"], strict=True)
+        print(f"[INFO] Initialized actor from {checkpoint}.")
 
     # Only write config files from rank 0 to avoid race conditions.
     if rank == 0:

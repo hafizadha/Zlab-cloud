@@ -1,49 +1,50 @@
-# Zlab Cloud · Ball sprint
+# Zlab Cloud · Straight BallSprint
 
-Fine-tune the Z01 to turn toward a randomly placed ball, sprint, and brake
-to a stable stop nearby. The ball starts 4–11 m away and can appear in any
-direction. Simulated ball position drives the policy's existing forward-speed
-and yaw commands. Training commands range up to 3.0 m/s, with lower speeds
-during turns and near the ball.
+Train the Z01 to sprint straight ahead, brake, and stop in front of a ball.
+Each trial places the ball 5–11 m ahead. The speed command ramps from 2.6 to
+4.4 m/s over the first 1,000 PPO updates. The controller corrects heading
+toward the lane center and reduces the speed command as the robot approaches.
 
-The rewards favor closing distance, staying upright, alternating footfalls,
-and brief airborne phases while moving forward. An arrival requires the
-robot to be 0.45–0.90 m from the ball and moving below 0.25 m/s. The bundled
-`model_15000.pt` is the starting locomotion checkpoint.
+A full pass holds a measured forward speed of at least 4 m/s for 0.2 seconds,
+then stays upright within 1 m of the ball at under 0.25 m/s for 0.4 seconds.
+Overshooting or displacing the ball by more than 0.15 m ends the trial.
 
-## Train on Linux
+Training applies short, randomly timed pushes to the torso. Force components
+range from −45 to +45 N and each push lasts 0.08–0.16 seconds. Foot friction
+is resampled between 0.35 and 1.15 at each reset. Training also varies the
+initial base pose and velocity, joint damping, motor gains, and body mass.
 
-Use Python 3.10–3.13, CUDA-enabled PyTorch, `flock`, and `unzip`. From the repo root, run
+## Train
+
+Use Python 3.10–3.13, CUDA-enabled PyTorch, `flock`, and `unzip`. From the repo root:
 
 ```bash
 cd Zlab_Gym
 python -m pip install -e . onnx
-./train_ball_sprint.sh 4500 64
+./train_ball_sprint.sh 2500 64
 ```
 
-The third argument optionally selects an explicit checkpoint. Otherwise the
-launcher uses the latest valid ball-sprint save in the log directory, or
-`model_15000.pt` for a fresh run. Set `ZLAB_LOG_ROOT` to an absolute path to
-use persistent storage.
-
-For Kaggle with two T4s, run the same script from `Zlab_Gym` after setup.
+For a Kaggle session with two T4s:
 
 ```bash
-ZLAB_USE_ALL_GPUS=1 ZLAB_LOG_ROOT=/kaggle/working/zlab-ball-sprint \
-  ./train_ball_sprint.sh 4500 1025
+ZLAB_USE_ALL_GPUS=1 ZLAB_LOG_ROOT=/kaggle/working/zlab-straight-ball-sprint \
+  ./train_ball_sprint.sh 2500 1024
 ```
 
-The environment count is per GPU. Checkpoints save every 500 updates and
-at the end under the selected log directory.
+The environment count is per GPU. With no saved checkpoint, the launcher
+starts from the bundled BallSprint actor. It resumes the newest valid
+checkpoint for this task in the selected log directory. Pass a checkpoint
+from this task as the third argument to select a specific save. Checkpoints
+save every 100 updates and at the end under
+`$ZLAB_LOG_ROOT/rsl_rl/z01_straight_ball_sprint/` (`logs` by default).
 
 ## Evaluate
 
 ```bash
 python scripts/play.py --checkpoint-file /path/to/model.pt \
-  --eval-episodes 100 --num-envs 16 --device cuda:0 --seed 2026
+  --eval-episodes 48 --num-envs 48 --device cuda:0 --seed 2026
 ```
 
-The evaluator counts clean arrivals, falls, and successful approaches with
-at least three qualifying flight samples and a peak forward speed of at
-least 2.0 m/s. It also reports mean peak speed. Omit `--eval-episodes` for
-interactive playback.
+The evaluator reports the combined sprint-and-stop pass rate, clean stops,
+falls, misses, timeouts, and mean peak forward speed. Add `--disturbances True`
+to evaluate with torso pushes and randomized starting poses.

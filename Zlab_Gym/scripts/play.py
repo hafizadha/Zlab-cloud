@@ -31,6 +31,8 @@ class PlayConfig:
     seed: int = 2026
     eval_episodes: int = 0
     """Run this many seeded ball-approach trials headlessly."""
+    disturbances: bool = False
+    """Include the training torso impulses and randomized starting pose."""
 
 
 def run_play(cfg: PlayConfig) -> None:
@@ -41,7 +43,9 @@ def run_play(cfg: PlayConfig) -> None:
         raise ValueError("eval-episodes cannot be negative.")
     configure_torch_backends()
     device = cfg.device or ("cuda:0" if torch.cuda.is_available() else "cpu")
-    env_cfg = load_env_cfg(TASK, play=True)
+    env_cfg = load_env_cfg(TASK, play=not cfg.disturbances)
+    speed_command = env_cfg.commands["twist"]
+    speed_command.min_speed = speed_command.max_speed
     env_cfg.scene.num_envs = cfg.num_envs
     env_cfg.seed = cfg.seed
     rl_cfg = load_rl_cfg(TASK)
@@ -65,43 +69,41 @@ def run_play(cfg: PlayConfig) -> None:
 
 @torch.inference_mode()
 def evaluate_ball_sprint(env: RslRlVecEnvWrapper, policy: Callable, episodes: int) -> None:
-  from src.tasks.velocity.config.z01_std_add_head.ball_sprint import sprint_flight, sprinting
+    from src.tasks.velocity.config.z01_std_add_head.ball_sprint import (
+        SPRINT_HOLD_SECONDS,
+        SPRINT_SPEED,
+    )
 
-  simulation = env.unwrapped
-  robot = simulation.scene["robot"].data
-  terminations = simulation.termination_manager
-  device = robot.root_link_lin_vel_b.device
-  per_env, remainder = divmod(episodes, env.num_envs)
-  remaining = torch.full((env.num_envs,), per_env, dtype=torch.int64, device=device)
-  remaining[:remainder] += 1
-  peak_speed = torch.zeros(env.num_envs, device=device)
-  flight_steps = torch.zeros_like(remaining)
-  successes = falls = sprint_successes = 0
-  total_peak_speed = torso_rate = 0.0
-  sprint_samples = 0
-  while remaining.any():
-    forward = robot.root_link_lin_vel_b[:, 0]
-    peak_speed = torch.maximum(peak_speed, forward)
-    flight_steps += sprint_flight(simulation)
-    fast = sprinting(simulation) & (remaining > 0)
-    sprint_samples += fast.sum().item()
-    torso_rate += robot.root_link_ang_vel_b[fast, :2].norm(dim=-1).rad2deg().sum().item()
-    _, _, done, _ = env.step(policy(env.get_observations()))
-    finished = done.bool() & (remaining > 0)
-    fell = finished & terminations.get_term("fell_over")
-    arrived = finished & terminations.get_term("ball_reached") & ~fell
-    successes += arrived.sum().item()
-    falls += fell.sum().item()
-    sprint_successes += (arrived & (flight_steps >= 3) & (peak_speed >= 2.0)).sum().item()
-    total_peak_speed += peak_speed[finished].sum().item()
-    remaining[finished] -= 1
-    peak_speed[finished] = 0.0
-    flight_steps[finished] = 0
-  print(f"[BALL SPRINT] Reached and stopped {successes}/{episodes}, falls {falls}/{episodes}")
-  print(f"[BALL SPRINT] Successful approaches with sprint flight {sprint_successes}/{episodes}, "
-        f"mean peak forward speed {total_peak_speed / episodes:.2f} m/s")
-  if sprint_samples:
-    print(f"[BALL SPRINT] Mean torso roll/pitch rate during fast approaches {torso_rate / sprint_samples:.1f} deg/s")
+    simulation = env.unwrapped
+    robot = simulation.scene["robot"].data
+    terminations = simulation.termination_manager
+    per_env, remainder = divmod(episodes, env.num_envs)
+    remaining = torch.full((env.num_envs,), per_env, dtype=torch.long, device=env.device)
+    remaining[:remainder] += 1
+    peak_speed = torch.zeros(env.num_envs, device=env.device)
+    # Keep counters on the simulation device until all trials finish.
+    totals = torch.zeros(5, device=env.device)
+    while remaining.any():
+        peak_speed = torch.maximum(peak_speed, robot.root_link_lin_vel_w[:, 0])
+        _, _, done, _ = env.step(policy(env.get_observations()))
+        finished = done.bool() & (remaining > 0)
+        fell = finished & terminations.get_term("fell_over")
+        stopped = finished & terminations.get_term("ball_reached") & ~fell
+        sprint_stop = stopped & terminations.get_term("sprint_success")
+        missed = finished & terminations.get_term("missed_ball") & ~fell & ~stopped
+        totals += torch.stack((
+            stopped.sum(), sprint_stop.sum(), fell.sum(), missed.sum(),
+            (peak_speed * finished).sum(),
+        ))
+        remaining -= finished.long()
+        peak_speed.masked_fill_(finished, 0.0)
+    stops, passes, falls, misses, peak_sum = totals.tolist()
+    timeouts = episodes - int(stops + falls + misses)
+    print(f"[BALL SPRINT] Held {SPRINT_SPEED:g} m/s for {SPRINT_HOLD_SECONDS:g} s "
+          f"and stopped within 1 m: {int(passes)}/{episodes}")
+    print(f"[BALL SPRINT] Clean stops {int(stops)}/{episodes}, falls {int(falls)}/{episodes}, "
+          f"missed balls {int(misses)}/{episodes}, timeouts {timeouts}/{episodes}")
+    print(f"[BALL SPRINT] Mean peak forward speed {peak_sum / episodes:.2f} m/s")
 
 
 if __name__ == "__main__":

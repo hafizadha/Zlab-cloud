@@ -5,7 +5,7 @@ from .rl_cfg import z01_std_add_head_velocity_ppo_runner_cfg
 from .ball_sprint import BallSprintOnPolicyRunner, ball_approach_env_cfg
 
 rl_cfg = z01_std_add_head_velocity_ppo_runner_cfg()
-rl_cfg.experiment_name = "z01_ball_sprint"
+rl_cfg.experiment_name = "z01_straight_ball_sprint"
 rl_cfg.actor.distribution_cfg["init_std"] = 0.15
 rl_cfg.algorithm.learning_rate = 5.0e-5
 rl_cfg.algorithm.schedule = "fixed"
