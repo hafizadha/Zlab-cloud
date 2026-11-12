@@ -25,6 +25,7 @@ from mjlab.utils.gpu import select_gpus
 from mjlab.tasks.registry import list_tasks, load_env_cfg, load_rl_cfg, load_runner_cls
 from mjlab.rl import MjlabOnPolicyRunner, RslRlBaseRunnerCfg, RslRlVecEnvWrapper
 from mjlab.envs import ManagerBasedRlEnv, ManagerBasedRlEnvCfg
+from scripts.checkpoint_upload import HuggingFaceCheckpoints
 import mjlab
 import torch
 import tyro
@@ -96,6 +97,7 @@ def run_train(task_id: str, cfg: TrainConfig, log_dir: Path) -> None:
 
     if rank == 0:
         print(f"[INFO] Logging experiment in directory: {log_dir}")
+    checkpoint_uploader = HuggingFaceCheckpoints.from_environment(log_dir.name) if rank == 0 else None
 
     env = ManagerBasedRlEnv(
         cfg=cfg.env, device=device, render_mode="rgb_array" if cfg.video else None
@@ -139,6 +141,8 @@ def run_train(task_id: str, cfg: TrainConfig, log_dir: Path) -> None:
         runner_cls = MjlabOnPolicyRunner
 
     runner_kwargs = {}
+    if checkpoint_uploader is not None:
+        runner_kwargs["checkpoint_uploader"] = checkpoint_uploader
     runner = runner_cls(env, agent_cfg, str(log_dir), device, **runner_kwargs)
 
     runner.add_git_repo_to_log(__file__)
@@ -156,11 +160,14 @@ def run_train(task_id: str, cfg: TrainConfig, log_dir: Path) -> None:
         dump_yaml(log_dir / "params" / "env.yaml", env_cfg)
         dump_yaml(log_dir / "params" / "agent.yaml", agent_cfg)
 
-    runner.learn(
-        num_learning_iterations=cfg.agent.max_iterations, init_at_random_ep_len=True
-    )
-
-    env.close()
+    try:
+        runner.learn(
+            num_learning_iterations=cfg.agent.max_iterations, init_at_random_ep_len=True
+        )
+    finally:
+        if checkpoint_uploader is not None:
+            checkpoint_uploader.close()
+        env.close()
 
 
 def launch_training(task_id: str, args: TrainConfig | None = None):

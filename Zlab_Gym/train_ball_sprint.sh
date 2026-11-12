@@ -4,6 +4,7 @@ set -euo pipefail
 cd -- "$(dirname -- "${BASH_SOURCE[0]}")"
 if [[ "${1:-}" == --help || "${1:-}" == -h ]]; then
     printf 'Usage: %s [updates] [num-envs per GPU] [checkpoint]\n' "$0"
+    printf '%s\n' 'Set ZLAB_HF_REPO_ID to owner/model-repo to mirror checkpoints to Hugging Face.'
     exit 0
 fi
 

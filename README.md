@@ -38,6 +38,36 @@ from this task as the third argument to select a specific save. Checkpoints
 save every 100 updates and at the end under
 `$ZLAB_LOG_ROOT/rsl_rl/z01_straight_ball_sprint/` (`logs` by default).
 
+## Save checkpoints to Hugging Face
+
+From `Zlab_Gym`, install the optional uploader and set the destination model
+repository. Use a Hugging Face token with write access to that repo.
+
+```bash
+python -m pip install -e '.[huggingface]' onnx
+export ZLAB_HF_REPO_ID=your-username/zlab-checkpoints
+./train_ball_sprint.sh 2500 64
+```
+
+On Kaggle, add `HF_TOKEN` under **Add-ons → Secrets**, enable it for the notebook,
+and load it before launching training. Keep Internet access enabled.
+
+```python
+import os
+from kaggle_secrets import UserSecretsClient
+
+os.environ["HF_TOKEN"] = UserSecretsClient().get_secret("HF_TOKEN")
+os.environ["ZLAB_HF_REPO_ID"] = "your-username/zlab-checkpoints"
+```
+
+On other hosts, inject `HF_TOKEN` from the host's secret store or use a cached
+Hugging Face login. Each scheduled checkpoint and the final save are kept on
+local disk and mirrored to `checkpoints/<run-name>/model_<iteration>.pt` in
+the model repo. The uploader creates a private repo if the configured repo is
+missing and the token permits creation. Check for `[HF] Uploaded` in the
+training log. An upload failure leaves the local checkpoint available for
+manual upload. Omit `ZLAB_HF_REPO_ID` for local-only training.
+
 ## Evaluate
 
 ```bash

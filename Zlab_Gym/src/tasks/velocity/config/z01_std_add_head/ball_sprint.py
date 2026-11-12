@@ -55,10 +55,16 @@ def apply_walking_profile(cfg):
 
 
 class BallSprintOnPolicyRunner(VelocityOnPolicyRunner):
-    def __init__(self, *args, **kwargs):
+    def __init__(self, *args, checkpoint_uploader=None, **kwargs):
         super().__init__(*args, **kwargs)
+        self._checkpoint_uploader = checkpoint_uploader
         # Keep the walking actor's input scale during PPO and checkpoint resume.
         self.alg.get_policy().obs_normalizer.until = 0
+
+    def save(self, path: str, infos=None):
+        super().save(path, infos)
+        if self._checkpoint_uploader is not None:
+            self._checkpoint_uploader.submit(Path(path))
 
 
 def _base_sprint_env_cfg(play: bool):

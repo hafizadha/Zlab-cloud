@@ -22,4 +22,5 @@ setup(
     packages=find_packages(include=["src", "src.*"]),
     version="0.0.1",
     install_requires=INSTALL_REQUIRES,
+    extras_require={"huggingface": ["huggingface_hub>=0.30,<2"]},
 )
