@@ -88,13 +88,16 @@ def evaluate_ball_sprint(env: RslRlVecEnvWrapper, policy: Callable, episodes: in
     simulation = env.unwrapped
     robot = simulation.scene["robot"].data
     terminations = simulation.termination_manager
+    command = simulation.command_manager.get_term("twist")
     per_env, remainder = divmod(episodes, env.num_envs)
     remaining = torch.full((env.num_envs,), per_env, dtype=torch.long, device=env.device)
     remaining[:remainder] += 1
     peak_speed = torch.zeros(env.num_envs, device=env.device)
-    # Keep counters on the simulation device until all trials finish.
-    totals = torch.zeros(5, device=env.device)
+    # Ball distance before the step identifies the trial that just ended.
+    totals = torch.zeros((3, 7), device=env.device)
     while remaining.any():
+        distance = command.ball_spawn_xy[:, 0] - simulation.scene.env_origins[:, 0]
+        distance_bin = ((distance - 5.0) / 2.0).long().clamp_(0, 2)
         peak_speed = torch.maximum(peak_speed, robot.root_link_lin_vel_w[:, 0])
         _, _, done, _ = env.step(policy(env.get_observations()))
         finished = done.bool() & (remaining > 0)
@@ -102,19 +105,27 @@ def evaluate_ball_sprint(env: RslRlVecEnvWrapper, policy: Callable, episodes: in
         stopped = finished & terminations.get_term("ball_reached") & ~fell
         sprint_stop = stopped & terminations.get_term("sprint_success")
         missed = finished & terminations.get_term("missed_ball") & ~fell & ~stopped
-        totals += torch.stack((
-            stopped.sum(), sprint_stop.sum(), fell.sum(), missed.sum(),
-            (peak_speed * finished).sum(),
-        ))
+        samples = torch.stack((
+            finished, stopped, sprint_stop, fell, missed, peak_speed * finished,
+            finished & (peak_speed >= SPRINT_SPEED),
+        ), dim=1)
+        totals.index_add_(0, distance_bin, samples)
         remaining -= finished.long()
         peak_speed.masked_fill_(finished, 0.0)
-    stops, passes, falls, misses, peak_sum = totals.tolist()
+    _, stops, passes, falls, misses, peak_sum, reached_speed = totals.sum(dim=0).tolist()
     timeouts = episodes - int(stops + falls + misses)
     print(f"[BALL SPRINT] Held {SPRINT_SPEED:g} m/s for {SPRINT_HOLD_SECONDS:g} s "
           f"and stopped within 1 m: {int(passes)}/{episodes}")
     print(f"[BALL SPRINT] Clean stops {int(stops)}/{episodes}, falls {int(falls)}/{episodes}, "
           f"missed balls {int(misses)}/{episodes}, timeouts {timeouts}/{episodes}")
     print(f"[BALL SPRINT] Mean peak forward speed {peak_sum / episodes:.2f} m/s")
+    print(f"[BALL SPRINT] Reached 4 m/s at least once {int(reached_speed)}/{episodes}")
+    for label, (count, stopped, passed, fell, _, _, _) in zip(
+        ("5–7 m", "7–9 m", "9–11 m"), totals.tolist(), strict=True
+    ):
+        if count:
+            print(f"[BALL SPRINT] {label}: {int(stopped)}/{int(count)} clean stops, "
+                  f"{int(passed)}/{int(count)} sprint-and-stop passes, {int(fell)} falls")
 
 
 if __name__ == "__main__":

@@ -168,6 +168,8 @@ def run_train(task_id: str, cfg: TrainConfig, log_dir: Path) -> None:
     if resume_path is not None:
         print(f"[INFO]: Loading model checkpoint from: {resume_path}")
         runner.load(str(resume_path), map_location="cpu")
+        # A saved iteration already completed its PPO update.
+        runner.current_learning_iteration += 1
     elif cfg.init_actor_checkpoint is not None:
         checkpoint = cfg.init_actor_checkpoint.expanduser().resolve(strict=True)
         state = torch.load(checkpoint, map_location="cpu", weights_only=True)
@@ -181,7 +183,7 @@ def run_train(task_id: str, cfg: TrainConfig, log_dir: Path) -> None:
 
     try:
         runner.learn(
-            num_learning_iterations=cfg.agent.max_iterations, init_at_random_ep_len=True
+            num_learning_iterations=cfg.agent.max_iterations
         )
     finally:
         if checkpoint_uploader is not None:

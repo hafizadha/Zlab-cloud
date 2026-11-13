@@ -6,7 +6,9 @@ toward the lane center and reduces the speed command as the robot approaches.
 
 A full pass holds a measured forward speed of at least 4 m/s for 0.2 seconds,
 then stays upright within 1 m of the ball at under 0.25 m/s for 0.4 seconds.
-Overshooting or displacing the ball by more than 0.15 m ends the trial.
+Trials end after 12 seconds, on a fall, or if the robot overshoots or displaces
+the ball by more than 0.15 m. A clean stop earns a terminal bonus. Falls,
+misses, and timeouts incur a penalty.
 
 Torso pushes can be added during training. At full strength, force components
 range from −45 to +45 N and each push lasts 0.08–0.16 seconds. Foot friction
@@ -80,7 +82,9 @@ local disk and mirrored to `checkpoints/<run-name>/model_<iteration>.pt` in
 the model repo. The uploader creates a private repo if the configured repo is
 missing and the token permits creation. Check for `[HF] Uploaded` in the
 training log. An upload failure leaves the local checkpoint available for
-manual upload. Omit `ZLAB_HF_REPO_ID` for local-only training.
+manual upload. To resume in a fresh Kaggle session, set `HF_RESUME_FILE` in
+the notebook to the checkpoint's path inside the model repo.
+Omit `ZLAB_HF_REPO_ID` for local-only training.
 
 ## Evaluate
 
@@ -90,6 +94,7 @@ python scripts/play.py --checkpoint-file /path/to/model.pt \
 ```
 
 The evaluator reports the combined sprint-and-stop pass rate, clean stops,
-falls, misses, timeouts, and mean peak forward speed. Match the command cap
+falls, misses, timeouts, and mean peak forward speed. It breaks down stops,
+passes, and falls by starting distance. Match the command cap
 to the training block. Use `--disturbances True --torso-push-scale 0.25` to
 evaluate with quarter-strength torso pushes and randomized starting poses.

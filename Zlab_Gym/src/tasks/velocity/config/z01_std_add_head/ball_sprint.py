@@ -154,6 +154,7 @@ class StraightBallSprintCommand(CommandTerm):
 
     def _resample_command(self, env_ids):
         self._command[env_ids] = 0.0
+        self._command[env_ids, 0] = self.cfg.speed_cap
         self.fast_steps[env_ids] = 0
         self.stop_steps[env_ids] = 0
         self.held_sprint[env_ids] = False
@@ -171,6 +172,9 @@ class StraightBallSprintCommand(CommandTerm):
         self._command[:, 2] = (1.5 * wrap_to_pi(lane_heading - robot.heading_w)).clamp(-0.6, 0.6)
 
     def _update_metrics(self):
+        pass  # Episode statistics are sampled before automatic resets.
+
+    def record_step(self):
         robot = self._env.scene["robot"].data
         forward = robot.root_link_lin_vel_w[:, 0]
         self.fast_steps.copy_(torch.where(forward >= SPRINT_SPEED, self.fast_steps + 1, 0))
@@ -219,12 +223,14 @@ def reset_straight_ball(env, env_ids):
 
 def settled_at_ball(env):
     command = env.command_manager.get_term("twist")
+    # The termination manager evaluates this once after physics and before reset.
+    command.record_step()
     return (command.stop_steps >= command.stop_steps_required) & command.in_stop_zone()
 
 
 def sprint_and_stop(env):
     command = env.command_manager.get_term("twist")
-    return command.held_sprint & settled_at_ball(env)
+    return command.held_sprint & env.termination_manager.get_term("ball_reached")
 
 
 def missed_ball(env):
@@ -263,6 +269,20 @@ def brake_tracking_error(env):
 def arrival_bonus(env):
     terminations = env.termination_manager
     return (terminations.get_term("ball_reached") & ~terminations.get_term("fell_over")).float()
+
+
+def failed_attempt(env):
+    terms = env.termination_manager
+    return terms.get_term("fell_over") | terms.get_term("missed_ball") | (
+        terms.get_term("time_out") & ~terms.get_term("ball_reached")
+    )
+
+
+def stalled_away_from_ball(env):
+    robot = env.scene["robot"].data
+    command = env.command_manager.get_term("twist")
+    gap = command.ball_spawn_xy[:, 0] - robot.root_link_pos_w[:, 0]
+    return (gap > 1.0) * (1.0 - robot.root_link_lin_vel_w[:, 0].clamp(0.0, 1.0))
 
 
 def sprinting(env):
@@ -328,7 +348,8 @@ def ball_approach_env_cfg(play=False):
                 "body_point_offset": (0.0, 0.0, 0.10),
             },
         )
-    cfg.episode_length_s = 20.0
+    cfg.episode_length_s = 12.0
+    cfg.is_finite_horizon = True
     cfg.viewer.distance = 5.0
     cfg.commands["twist"] = StraightBallSprintCommandCfg(
         resampling_time_range=(100.0, 100.0),
@@ -341,18 +362,22 @@ def ball_approach_env_cfg(play=False):
     cfg.events["reset_ball"] = EventTermCfg(func=reset_straight_ball, mode="reset")
     cfg.terminations.update(
         ball_reached=TerminationTermCfg(func=settled_at_ball),
+        # Read the clean-stop result from this step, after its counters update.
         sprint_success=TerminationTermCfg(func=sprint_and_stop),
         missed_ball=TerminationTermCfg(func=missed_ball),
     )
     cfg.rewards["track_linear_velocity"].params["std"] = 0.65
     cfg.rewards["upright"].weight = 2.5
     cfg.rewards["body_ang_vel"].weight = -0.35
+    terminal_scale = 1.0 / (cfg.sim.mujoco.timestep * cfg.decimation) if cfg.scale_rewards_by_dt else 1.0
     cfg.rewards.update(
         ball_progress=RewardTermCfg(func=sprint_progress, weight=1.5),
-        ball_arrival=RewardTermCfg(func=arrival_bonus, weight=300.0),
+        ball_arrival=RewardTermCfg(func=arrival_bonus, weight=24.0 * terminal_scale),
         settle_at_ball=RewardTermCfg(func=settle_reward, weight=0.8),
         brake_tracking=RewardTermCfg(func=brake_tracking_error, weight=-1.0),
-        sprint_success=RewardTermCfg(func=sprint_success_reward, weight=150.0),
+        sprint_success=RewardTermCfg(func=sprint_success_reward, weight=12.0 * terminal_scale),
+        failed_attempt=RewardTermCfg(func=failed_attempt, weight=-10.0 * terminal_scale),
+        stalled_away=RewardTermCfg(func=stalled_away_from_ball, weight=-4.0),
         sprint_flight=RewardTermCfg(func=sprint_flight, weight=1.1),
         sprint_footfall=RewardTermCfg(
             func=sprint_footfall,
