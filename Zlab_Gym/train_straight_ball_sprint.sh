@@ -3,17 +3,21 @@ set -euo pipefail
 
 cd -- "$(dirname -- "${BASH_SOURCE[0]}")"
 if [[ "${1:-}" == --help || "${1:-}" == -h ]]; then
-    printf 'Usage: %s [updates] [num-envs per GPU] [checkpoint]\n' "$0"
+    printf 'Usage: %s [updates] [num-envs per GPU] [straight-sprint checkpoint to resume]\n' "$0"
     printf '%s\n' 'Set ZLAB_HF_REPO_ID to owner/model-repo to mirror checkpoints to Hugging Face.'
     exit 0
 fi
 
-updates="${1:-2500}"
+updates="${1:-500}"
 num_envs="${2:-64}"
 save_interval="${ZLAB_SAVE_INTERVAL:-100}"
 if (( $# > 3 )) || [[ ! "$updates" =~ ^[1-9][0-9]*$ || ! "$num_envs" =~ ^[1-9][0-9]*$ || ! "$save_interval" =~ ^[1-9][0-9]*$ ]]; then
     printf 'Updates, environment count, and ZLAB_SAVE_INTERVAL must be positive integers.\n' >&2
     exit 2
+fi
+
+if revision="$(git rev-parse --short HEAD 2>/dev/null)"; then
+    printf '[BALL SPRINT] Zlab-cloud commit %s\n' "$revision"
 fi
 
 log_root="${ZLAB_LOG_ROOT:-logs}"
@@ -22,19 +26,6 @@ exec 9>"$log_root/ball-sprint.lock"
 flock -n 9 || { printf 'Ball-sprint training is already running in this log directory.\n' >&2; exit 1; }
 
 checkpoint="${3:-}"
-if [[ -z "$checkpoint" ]]; then
-    shopt -s nullglob
-    best=-1
-    for candidate in "$log_root"/rsl_rl/z01_straight_ball_sprint/*/model_*.pt; do
-        if [[ "${candidate##*/}" =~ ^model_([0-9]+)\.pt$ ]]; then
-            iteration=$((10#${BASH_REMATCH[1]}))
-            if (( iteration >= best )) && unzip -tqq "$candidate" >/dev/null 2>&1; then
-                best="$iteration"
-                checkpoint="$candidate"
-            fi
-        fi
-    done
-fi
 if [[ -n "$checkpoint" ]]; then
     checkpoint="$(realpath -e -- "$checkpoint")"
     unzip -tqq "$checkpoint"
@@ -54,8 +45,9 @@ gpu_args=()
 if [[ "${ZLAB_USE_ALL_GPUS:-0}" == 1 ]]; then
     gpu_args=(--gpu-ids all)
 fi
-exec "${ZLAB_PYTHON:-python}" -u scripts/train.py Z01-StdAddHead-Soccer-BallSprint \
+exec "${ZLAB_PYTHON:-python}" -u scripts/train.py \
     "${gpu_args[@]}" "${checkpoint_args[@]}" \
     --log-root="$log_root" --env.scene.num-envs="$num_envs" \
     --agent.max-iterations="$updates" --agent.save-interval="$save_interval" \
+    --command-speed="${ZLAB_COMMAND_SPEED:-2.8}" --torso-push-scale="${ZLAB_TORSO_PUSH_SCALE:-0}" \
     --agent.run-name=short-ball-sprint-4mps

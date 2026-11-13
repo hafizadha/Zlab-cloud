@@ -26,6 +26,7 @@ BALL_RADIUS = 0.11
 SPRINT_SPEED = 4.0
 SPRINT_HOLD_SECONDS = 0.2
 MAX_COMMAND_SPEED = 4.4
+CHECKPOINT_TASK = "straight-ball-sprint"
 
 
 def apply_walking_profile(cfg):
@@ -62,9 +63,24 @@ class BallSprintOnPolicyRunner(VelocityOnPolicyRunner):
         self.alg.get_policy().obs_normalizer.until = 0
 
     def save(self, path: str, infos=None):
-        super().save(path, infos)
+        super().save(path, {**(infos or {}), "task": CHECKPOINT_TASK})
         if self._checkpoint_uploader is not None:
             self._checkpoint_uploader.submit(Path(path))
+
+
+def check_sprint_checkpoint(checkpoint: Path) -> None:
+    state = torch.load(checkpoint, map_location="cpu", weights_only=True)
+    if (state.get("infos") or {}).get("task") != CHECKPOINT_TASK:
+        raise ValueError(f"{checkpoint.name} is not a checkpoint from the active straight BallSprint task.")
+
+
+def set_push_strength(cfg, scale: float) -> None:
+    if scale == 0.0:
+        cfg.events.pop("torso_impulse", None)
+        return
+    impulse = cfg.events["torso_impulse"]
+    impulse.params["force_range"] = (-45.0 * scale, 45.0 * scale)
+    impulse.params["torque_range"] = (-3.0 * scale, 3.0 * scale)
 
 
 def _base_sprint_env_cfg(play: bool):
@@ -110,9 +126,7 @@ def _ball_spec() -> mujoco.MjSpec:
 
 @dataclass(kw_only=True)
 class StraightBallSprintCommandCfg(CommandTermCfg):
-    min_speed: float = 2.6
-    max_speed: float = MAX_COMMAND_SPEED
-    speed_ramp_steps: int = 24_000
+    speed_cap: float = 2.8
     ball_distance_range: tuple[float, float] = (5.0, 11.0)
 
     def build(self, env):
@@ -123,7 +137,7 @@ class StraightBallSprintCommand(CommandTerm):
     def __init__(self, cfg, env):
         super().__init__(cfg, env)
         self._command = torch.zeros((self.num_envs, 3), device=self.device)
-        self._speed = torch.zeros(self.num_envs, device=self.device)
+        self._speed = torch.full((self.num_envs,), cfg.speed_cap, device=self.device)
         self.ball_spawn_xy = torch.zeros((self.num_envs, 2), device=self.device)
         self.fast_steps = torch.zeros(self.num_envs, dtype=torch.long, device=self.device)
         self.stop_steps = torch.zeros_like(self.fast_steps)
@@ -147,8 +161,6 @@ class StraightBallSprintCommand(CommandTerm):
     def _update_command(self):
         env = self._env
         robot = env.scene["robot"].data
-        ramp = min(env.common_step_counter / max(self.cfg.speed_ramp_steps, 1), 1.0)
-        self._speed.fill_(self.cfg.min_speed + ramp * (self.cfg.max_speed - self.cfg.min_speed))
         forward_gap = self.ball_spawn_xy[:, 0] - robot.root_link_pos_w[:, 0]
         remaining = (forward_gap - 0.60).clamp_min(0.0)
         braking_speed = (7.0 * remaining).sqrt().minimum(1.8 * remaining)
@@ -239,6 +251,15 @@ def settle_reward(env):
     return torch.exp(-position_error / 0.45**2 - speed_error / 0.5**2)
 
 
+def brake_tracking_error(env):
+    command = env.command_manager.get_term("twist")
+    robot = env.scene["robot"].data
+    remaining = command.ball_spawn_xy[:, 0] - robot.root_link_pos_w[:, 0]
+    forward = robot.root_link_lin_vel_w[:, 0]
+    excess_speed = (forward - command.command[:, 0]).clamp(0.0, 4.4)
+    return (remaining < 3.0) * excess_speed.square()
+
+
 def arrival_bonus(env):
     terminations = env.termination_manager
     return (terminations.get_term("ball_reached") & ~terminations.get_term("fell_over")).float()
@@ -311,7 +332,7 @@ def ball_approach_env_cfg(play=False):
     cfg.viewer.distance = 5.0
     cfg.commands["twist"] = StraightBallSprintCommandCfg(
         resampling_time_range=(100.0, 100.0),
-        min_speed=MAX_COMMAND_SPEED if play else 2.6,
+        speed_cap=MAX_COMMAND_SPEED if play else 2.8,
     )
     cfg.scene.entities["ball"] = EntityCfg(
         spec_fn=_ball_spec,
@@ -330,6 +351,7 @@ def ball_approach_env_cfg(play=False):
         ball_progress=RewardTermCfg(func=sprint_progress, weight=1.5),
         ball_arrival=RewardTermCfg(func=arrival_bonus, weight=300.0),
         settle_at_ball=RewardTermCfg(func=settle_reward, weight=0.8),
+        brake_tracking=RewardTermCfg(func=brake_tracking_error, weight=-1.0),
         sprint_success=RewardTermCfg(func=sprint_success_reward, weight=150.0),
         sprint_flight=RewardTermCfg(func=sprint_flight, weight=1.1),
         sprint_footfall=RewardTermCfg(

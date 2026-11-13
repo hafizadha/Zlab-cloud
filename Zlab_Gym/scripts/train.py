@@ -22,13 +22,17 @@ from mjlab.utils.wrappers import VideoRecorder
 from mjlab.utils.torch import configure_torch_backends
 from mjlab.utils.os import dump_yaml, get_checkpoint_path
 from mjlab.utils.gpu import select_gpus
-from mjlab.tasks.registry import list_tasks, load_env_cfg, load_rl_cfg, load_runner_cls
+from mjlab.tasks.registry import load_env_cfg, load_rl_cfg, load_runner_cls
 from mjlab.rl import MjlabOnPolicyRunner, RslRlBaseRunnerCfg, RslRlVecEnvWrapper
 from mjlab.envs import ManagerBasedRlEnv, ManagerBasedRlEnvCfg
 from scripts.checkpoint_upload import HuggingFaceCheckpoints
 import mjlab
 import torch
 import tyro
+from src.tasks.velocity.config.z01_std_add_head import TASK_ID
+from src.tasks.velocity.config.z01_std_add_head.ball_sprint import (
+    MAX_COMMAND_SPEED, check_sprint_checkpoint, set_push_strength,
+)
 from typing import Literal
 from pathlib import Path
 from datetime import datetime
@@ -46,6 +50,8 @@ class TrainConfig:
     env: ManagerBasedRlEnvCfg
     agent: RslRlBaseRunnerCfg
     init_actor_checkpoint: Path | None = None
+    command_speed: float = 2.8
+    torso_push_scale: float = 0.0
     video: bool = False
     video_length: int = 200
     video_interval: int = 2000
@@ -67,6 +73,12 @@ class TrainConfig:
 def run_train(task_id: str, cfg: TrainConfig, log_dir: Path) -> None:
     if cfg.init_actor_checkpoint is not None and cfg.agent.resume:
         raise ValueError("--init-actor-checkpoint and --agent.resume are mutually exclusive.")
+    if not 2.6 <= cfg.command_speed <= MAX_COMMAND_SPEED:
+        raise ValueError("--command-speed must be between 2.6 and 4.4 m/s.")
+    cfg.env.commands["twist"].speed_cap = cfg.command_speed
+    if not 0.0 <= cfg.torso_push_scale <= 1.0:
+        raise ValueError("--torso-push-scale must be between 0 and 1.")
+    set_push_strength(cfg.env, cfg.torso_push_scale)
 
     cuda_visible = os.environ.get("CUDA_VISIBLE_DEVICES", "")
     if cuda_visible == "":
@@ -97,11 +109,13 @@ def run_train(task_id: str, cfg: TrainConfig, log_dir: Path) -> None:
 
     if rank == 0:
         print(f"[INFO] Logging experiment in directory: {log_dir}")
+        command = cfg.env.commands["twist"]
+        print(
+            f"[INFO] {task_id}: ball {command.ball_distance_range} m straight ahead, "
+            f"command cap {command.speed_cap:g} m/s, "
+            f"torso push scale {cfg.torso_push_scale:g}"
+        )
     checkpoint_uploader = HuggingFaceCheckpoints.from_environment(log_dir.name) if rank == 0 else None
-
-    env = ManagerBasedRlEnv(
-        cfg=cfg.env, device=device, render_mode="rgb_array" if cfg.video else None
-    )
 
     # Go up from specific run dir to experiment dir.
     log_root_path = log_dir.parent
@@ -119,6 +133,11 @@ def run_train(task_id: str, cfg: TrainConfig, log_dir: Path) -> None:
             resume_path = get_checkpoint_path(
                 log_root_path, cfg.agent.load_run, cfg.agent.load_checkpoint
             )
+        check_sprint_checkpoint(resume_path)
+
+    env = ManagerBasedRlEnv(
+        cfg=cfg.env, device=device, render_mode="rgb_array" if cfg.video else None
+    )
 
     # Only record videos on rank 0 to avoid multiple workers writing to the same files.
     if cfg.video and rank == 0:
@@ -226,28 +245,12 @@ def launch_training(task_id: str, args: TrainConfig | None = None):
 
 
 def main():
-    # Parse first argument to choose the task.
-    # Import tasks to populate the registry.
-    import src.tasks
-
-    all_tasks = list_tasks()
-    chosen_task, remaining_args = tyro.cli(
-        tyro.extras.literal_type_from_choices(all_tasks),
-        add_help=False,
-        return_unknown_args=True,
-        config=mjlab.TYRO_FLAGS,
-    )
-
     args = tyro.cli(
         TrainConfig,
-        args=remaining_args,
-        default=TrainConfig.from_task(chosen_task),
-        prog=sys.argv[0] + f" {chosen_task}",
+        default=TrainConfig.from_task(TASK_ID),
         config=mjlab.TYRO_FLAGS,
     )
-    del remaining_args
-
-    launch_training(task_id=chosen_task, args=args)
+    launch_training(task_id=TASK_ID, args=args)
 
 
 if __name__ == "__main__":

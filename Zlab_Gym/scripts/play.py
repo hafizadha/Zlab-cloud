@@ -19,8 +19,8 @@ from mjlab.utils.torch import configure_torch_backends
 from mjlab.viewer import NativeMujocoViewer, ViserPlayViewer
 
 import src.tasks  # noqa: F401
-
-TASK = "Z01-StdAddHead-Soccer-BallSprint"
+from src.tasks.velocity.config.z01_std_add_head import TASK_ID
+from src.tasks.velocity.config.z01_std_add_head.ball_sprint import MAX_COMMAND_SPEED, set_push_strength
 
 
 @dataclass(frozen=True)
@@ -33,6 +33,10 @@ class PlayConfig:
     """Run this many seeded ball-approach trials headlessly."""
     disturbances: bool = False
     """Include the training torso impulses and randomized starting pose."""
+    torso_push_scale: float = 1.0
+    """Set impulse strength when disturbances are enabled."""
+    command_speed: float = MAX_COMMAND_SPEED
+    """Set a fixed speed cap for evaluation."""
 
 
 def run_play(cfg: PlayConfig) -> None:
@@ -41,21 +45,28 @@ def run_play(cfg: PlayConfig) -> None:
         raise ValueError("num-envs must be positive.")
     if cfg.eval_episodes < 0:
         raise ValueError("eval-episodes cannot be negative.")
+    if not 2.6 <= cfg.command_speed <= MAX_COMMAND_SPEED:
+        raise ValueError("--command-speed must be between 2.6 and 4.4 m/s.")
+    if not 0.0 <= cfg.torso_push_scale <= 1.0:
+        raise ValueError("--torso-push-scale must be between 0 and 1.")
     configure_torch_backends()
     device = cfg.device or ("cuda:0" if torch.cuda.is_available() else "cpu")
-    env_cfg = load_env_cfg(TASK, play=not cfg.disturbances)
+    env_cfg = load_env_cfg(TASK_ID, play=not cfg.disturbances)
+    if cfg.disturbances:
+        set_push_strength(env_cfg, cfg.torso_push_scale)
     speed_command = env_cfg.commands["twist"]
-    speed_command.min_speed = speed_command.max_speed
+    speed_command.speed_cap = cfg.command_speed
     env_cfg.scene.num_envs = cfg.num_envs
     env_cfg.seed = cfg.seed
-    rl_cfg = load_rl_cfg(TASK)
+    rl_cfg = load_rl_cfg(TASK_ID)
     env = RslRlVecEnvWrapper(
         ManagerBasedRlEnv(cfg=env_cfg, device=device),
         clip_actions=rl_cfg.clip_actions,
     )
     try:
-        runner = load_runner_cls(TASK)(env, asdict(rl_cfg), device=device)
-        runner.load(str(checkpoint), load_cfg={"actor": True}, map_location="cpu")
+        runner = load_runner_cls(TASK_ID)(env, asdict(rl_cfg), device=device)
+        state = torch.load(checkpoint, map_location="cpu", weights_only=True)
+        runner.alg.get_policy().load_state_dict(state["actor_state_dict"], strict=True)
         policy = runner.get_inference_policy(device=device)
         if cfg.eval_episodes:
             evaluate_ball_sprint(env, policy, cfg.eval_episodes)
