@@ -1,100 +1,115 @@
-# Zlab Cloud · Straight BallSprint
+# Zlab Cloud · Ball approach stability
 
-Train the Z01 to sprint straight ahead, brake, and stop in front of a ball.
-Each trial places the ball 5–11 m ahead. The controller corrects heading
-toward the lane center and reduces the speed command as the robot approaches.
+Fine-tune checkpoint 1400 at a fixed 2.8 m/s command cap. Each trial places
+the ball 5–11 m ahead. A clean stop requires the robot to settle within 1 m
+of the ball for 0.4 s, below 0.25 m/s, within 0.25 m laterally, and with yaw
+within 12° of the lane. Robot–ball contact ends the approach and costs 25
+reward units. Other failed attempts cost 10. Lane offset, sideways velocity,
+and yaw error are penalized throughout the approach.
 
-A full pass holds a measured forward speed of at least 4 m/s for 0.2 seconds,
-then stays upright within 1 m of the ball at under 0.25 m/s for 0.4 seconds.
-Trials end after 12 seconds, on a fall, or if the robot overshoots or displaces
-the ball by more than 0.15 m. A clean stop earns a terminal bonus. Falls,
-misses, and timeouts incur a penalty.
+The controller holds head pitch/yaw and all six wrist joints at their nominal
+targets. The actor still has 29 action channels so checkpoint 1400 can load.
+The exported ONNX metadata carries a zero action scale for each held joint.
+The robot uses its existing position servos to hold the targets.
 
-Torso pushes can be added during training. At full strength, force components
-range from −45 to +45 N and each push lasts 0.08–0.16 seconds. Foot friction
-is resampled between 0.35 and 1.15 at each reset. Training also varies the
-initial base pose and velocity, joint damping, motor gains, and body mass.
+## Kaggle T4 training
 
-## Train
+Open [zlab-training.ipynb](zlab-training.ipynb) with a GPU accelerator and
+Internet access. Attach `model_1400.pt` as a Kaggle input or specify its path
+in the training cell. The notebook clones `main` and runs for a budget of nine
+hours by default, or until all stability profiles pass. Kaggle can end the
+session according to its own runtime and quota limits.
 
-Open [zlab-training.ipynb](zlab-training.ipynb) in Kaggle. The notebook clones
-`main` into a fresh directory, prints the commit, and calls
-`train_straight_ball_sprint.sh`. The launcher prints the active task ID,
-ball range, command cap, and torso push strength before training. Keep the
-run outputs under `/kaggle/working` and the clone outside that directory.
+The notebook uses 128 environments per visible T4, 100 updates per block,
+and saves every 25 updates plus the final update. The first block loads 1400's
+actor, preserves its observer normalization, caps initial action exploration,
+and starts a fresh critic and optimizer for the changed task. Later blocks
+load the retained actor and critic with a fresh optimizer. Use
+`/kaggle/working/zlab-ball-stability/progress.json` to find the selected
+checkpoint and completed profile. Keep the work directory to resume within the
+same session. In a new session, supply the retained checkpoint as the starting
+checkpoint. Copy the corresponding work directory too if you want to retain
+the saved progress, and keep its paths accessible.
 
-On Linux, use Python 3.10–3.13, CUDA-enabled PyTorch, `flock`, and `unzip`:
+For optional Hugging Face backups, supply a write-capable `HF_TOKEN` in
+Kaggle Secrets and enable uploads in the notebook. Periodic training
+checkpoints are stored under `checkpoints/<run-name>/model_<iteration>.pt`.
+The selection file identifies which checkpoint to use.
+
+## Stability training plan
+
+1. Start from 1400 at 2.8 m/s with zero pushes and sensor noise. Maintain
+   randomized start position and heading, surface friction, mass, encoder bias,
+   motor gains, and actuator delay. Review lane offset and heading alongside
+   successful stops.
+2. Keep 2.8 m/s throughout the robustness blocks. Increase torso pushes and
+   sensor noise together through quarter, half, and full configured strength.
+   Every block evaluates its final checkpoint on the same 48 trials as the
+   incumbent. Favor zero touches, fewer falls, more clean stops, and lower lane
+   and heading error, in that order. Each profile must pass on a second seed
+   and the clean profile before the next increase. The gates are at least
+   46/48 clean stops, zero touches, at most one fall, ≤0.30 m at the 95th
+   percentile of maximum lane offset, and ≤15° at the 95th percentile of
+   maximum heading error.
+3. Run an independent 96-trial check after tuning. Review failures by starting
+   distance. For hardware transfer, validate joint mapping, held-joint targets,
+   action scale, default pose, sign conventions, PD gains, and observation
+   ordering before enabling the policy. Feed the same 29 raw previous-action
+   values used during training into the observations. Apply the ONNX per-joint
+   scales to motor targets, including the zero scales. If a deployment adapter
+   hardcodes a uniform action scale, update it before running this policy.
+4. Verify the state estimator and command latency against logs. Start on
+   hardware at a lower command and advance through short approaches on the
+   intended turf. Test friction changes, battery states, starting yaw, and
+   lateral offsets before repeated runs at 2.8 m/s. Keep the strongest policy
+   based on clean stops, ball touches, and falls. For match play, separately
+   measure successful kicks and time from approach to kick. Revisit higher
+   speed only after that sequence is reliable.
+
+## Linux
+
+Run a single block with Python 3.10–3.13, CUDA PyTorch and `flock`.
 
 ```bash
 cd Zlab_Gym
 python -m pip install -e . onnx
-./train_straight_ball_sprint.sh 500 64
+./train_ball_stability.sh /absolute/path/to/model_1400.pt 100 128
 ```
 
-The environment count is per GPU. Use `ZLAB_USE_ALL_GPUS=1` for all visible GPUs.
-The launcher starts from the bundled actor unless you pass a checkpoint from
-this task as the third argument. Checkpoints save every 100 updates and at the
-end under `$ZLAB_LOG_ROOT/rsl_rl/z01_straight_ball_sprint/` (`logs` by default).
-
-### Training blocks
-
-1. Start with 500 updates at a 2.8 m/s cap, with foot friction and motor
-   randomization and zero torso pushes. Evaluate saves on 48 trials at the same
-   cap. Use clean stops as the primary measure. Aim for at least 38/48 clean
-   stops and at most 4/48 falls before increasing speed.
-2. Resume the strongest save in 300–500-update blocks at command caps of 3.2,
-   3.6, 4.0, and 4.4 m/s. Use `ZLAB_COMMAND_SPEED` to set each cap. Evaluate
-   after each block and advance only when clean stops and falls meet the same
-   gate. At 4.4 m/s, rank checkpoints by the combined 4 m/s and clean-stop
-   criterion. Aim for at least 38/48 combined passes and at most 4/48 falls
-   before adding pushes. Inspect failures on the shortest placements before
-   spending more updates at that cap.
-3. Once the policy can sprint and brake reliably, add torso pushes with
-   `ZLAB_TORSO_PUSH_SCALE=0.25`, then 0.5 and 1.0. Compare performance with
-   and without pushes. Use the combined pass rate and fall count on a fresh
-   evaluation seed to choose the final checkpoint.
-
-## Save checkpoints to Hugging Face
-
-From `Zlab_Gym`, install the optional uploader and set the destination model
-repository. Use a Hugging Face token with write access to that repo.
+Set `ZLAB_TORSO_PUSH_SCALE` and `ZLAB_OBSERVATION_NOISE_SCALE` for a manual
+robustness block. The automated blocks can also run outside Kaggle.
 
 ```bash
-python -m pip install -e '.[huggingface]' onnx
-export ZLAB_HF_REPO_ID=your-username/zlab-checkpoints
-./train_straight_ball_sprint.sh 500 64
+python scripts/train_stability_blocks.py /absolute/path/to/model_1400.pt \
+  --work-dir logs/stability-blocks --hours 9
 ```
 
-On Kaggle, add `HF_TOKEN` under **Add-ons → Secrets**, enable it for the notebook,
-and load it before launching training. Keep Internet access enabled.
-
-```python
-import os
-from kaggle_secrets import UserSecretsClient
-
-os.environ["HF_TOKEN"] = UserSecretsClient().get_secret("HF_TOKEN")
-os.environ["ZLAB_HF_REPO_ID"] = "your-username/zlab-checkpoints"
-```
-
-On other hosts, inject `HF_TOKEN` from the host's secret store or use a cached
-Hugging Face login. Each scheduled checkpoint and the final save are kept on
-local disk and mirrored to `checkpoints/<run-name>/model_<iteration>.pt` in
-the model repo. The uploader creates a private repo if the configured repo is
-missing and the token permits creation. Check for `[HF] Uploaded` in the
-training log. An upload failure leaves the local checkpoint available for
-manual upload. To resume in a fresh Kaggle session, set `HF_RESUME_FILE` in
-the notebook to the checkpoint's path inside the model repo.
-Omit `ZLAB_HF_REPO_ID` for local-only training.
-
-## Evaluate
+Evaluate the selected checkpoint at 2.8 m/s.
 
 ```bash
-python scripts/play.py --checkpoint-file /path/to/model.pt \
-  --eval-episodes 48 --num-envs 48 --device cuda:0 --seed 2026 --command-speed 2.8
+python scripts/play.py --checkpoint-file /absolute/path/to/model.pt \
+  --eval-episodes 48 --num-envs 48 --device cuda:0 --seed 9187 \
+  --disturbances True --torso-push-scale 0.25 --observation-noise-scale 0.25
 ```
 
-The evaluator reports the combined sprint-and-stop pass rate, clean stops,
-falls, misses, timeouts, and mean peak forward speed. It breaks down stops,
-passes, and falls by starting distance. Match the command cap
-to the training block. Use `--disturbances True --torso-push-scale 0.25` to
-evaluate with quarter-strength torso pushes and randomized starting poses.
+## Transfer to the 22 × 14 m artificial-turf field
+
+Use the 5–11 m training drill in the middle of the pitch first. The simulator
+uses a flat plane with randomized foot traction, motor lag, and contact
+disturbances. The default friction range (0.35–1.15) represents simulation
+uncertainty. This model approximates traction and samples 0–15 ms of motor
+command lag. Turf compliance, surface roughness, gearbox backlash, voltage
+sag, and motor temperature still need physical characterization. Measure
+end-to-end control latency, motor current, temperature, slip, and braking on
+the event turf with the competition
+boot soles, then adjust `FOOT_FRICTION_RANGE` in the notebook or
+`ZLAB_FOOT_FRICTION_MIN` and `ZLAB_FOOT_FRICTION_MAX` on Linux. Evaluate the
+endpoints with `--foot-friction-min LOW --foot-friction-max HIGH` and test both running directions
+across the turf. Check performance near seams or worn patches.
+
+Measure speed, lane deviation, yaw, stop distance, touches, and falls from
+center-field trials. Repeat from farther upfield and with the approach
+rotated or offset. Keep path planning and sideline margins in the match
+controller. The policy assumes a locally straight approach and uses forward
+speed and yaw commands. Verify the real ball-location estimate and braking
+trigger with the deployed camera and state estimator.

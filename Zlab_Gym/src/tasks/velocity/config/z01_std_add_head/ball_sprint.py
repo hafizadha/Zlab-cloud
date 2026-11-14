@@ -1,4 +1,4 @@
-"""Sprint straight toward a ball, then brake and settle in front of it."""
+"""Approach the ball in a straight lane and stop without touching it."""
 
 import json
 import math
@@ -15,7 +15,9 @@ from mjlab.managers.event_manager import EventTermCfg
 from mjlab.managers.reward_manager import RewardTermCfg
 from mjlab.managers.scene_entity_config import SceneEntityCfg
 from mjlab.managers.termination_manager import TerminationTermCfg
-from mjlab.utils.lab_api.math import quat_apply_inverse, wrap_to_pi
+from mjlab.sensor import ContactMatch, ContactSensorCfg
+from mjlab.utils.lab_api.math import wrap_to_pi
+from mjlab.utils.noise import UniformNoiseCfg
 
 from mjlab.tasks.velocity.rl import VelocityOnPolicyRunner
 
@@ -23,10 +25,14 @@ from .env_cfgs import _ROOT_BODY_NAME, z01_std_add_head_flat_env_cfg
 
 
 BALL_RADIUS = 0.11
-SPRINT_SPEED = 4.0
-SPRINT_HOLD_SECONDS = 0.2
-MAX_COMMAND_SPEED = 4.4
+STABILITY_SPEED = 2.8
+DEFAULT_FOOT_FRICTION = (0.35, 1.15)
 CHECKPOINT_TASK = "straight-ball-sprint"
+STABILITY_STAGE = "stability-2.8"
+BALL_CONTACT_SENSOR = "robot_ball_contact"
+HELD_JOINTS = r"(?:head_.*|(?:left|right)_wrist_.*)"
+MOVING_JOINTS = rf"(?!{HELD_JOINTS}$).*"
+STOP_HEADING_RAD = math.radians(12)
 
 
 def apply_walking_profile(cfg):
@@ -53,6 +59,15 @@ def apply_walking_profile(cfg):
                                      stiffness=stiffness[name], damping=damping[name]),
                 ))
     robot.articulation = replace(robot.articulation, actuators=tuple(actuators))
+    # The source scale keys are regexes. Resolve them against actual joint names.
+    # Export concrete per-joint scales while keeping all 29 policy outputs.
+    action = cfg.actions["joint_pos"]
+    action.scale = {
+        name: 0.0 if re.fullmatch(HELD_JOINTS, name) else scale
+        for pattern, scale in action.scale.items()
+        for name in names
+        if re.fullmatch(pattern, name)
+    }
 
 
 class BallSprintOnPolicyRunner(VelocityOnPolicyRunner):
@@ -63,15 +78,9 @@ class BallSprintOnPolicyRunner(VelocityOnPolicyRunner):
         self.alg.get_policy().obs_normalizer.until = 0
 
     def save(self, path: str, infos=None):
-        super().save(path, {**(infos or {}), "task": CHECKPOINT_TASK})
+        super().save(path, {**(infos or {}), "task": CHECKPOINT_TASK, "stage": STABILITY_STAGE})
         if self._checkpoint_uploader is not None:
             self._checkpoint_uploader.submit(Path(path))
-
-
-def check_sprint_checkpoint(checkpoint: Path) -> None:
-    state = torch.load(checkpoint, map_location="cpu", weights_only=True)
-    if (state.get("infos") or {}).get("task") != CHECKPOINT_TASK:
-        raise ValueError(f"{checkpoint.name} is not a checkpoint from the active straight BallSprint task.")
 
 
 def set_push_strength(cfg, scale: float) -> None:
@@ -83,14 +92,50 @@ def set_push_strength(cfg, scale: float) -> None:
     impulse.params["torque_range"] = (-3.0 * scale, 3.0 * scale)
 
 
+def set_foot_friction(cfg, friction: tuple[float, float]) -> None:
+    low, high = friction
+    if not (math.isfinite(low) and math.isfinite(high) and 0 < low <= high):
+        raise ValueError("Foot friction needs positive, finite, ordered limits.")
+    cfg.events["foot_friction"].params["ranges"] = friction
+
+
+def set_observation_noise(cfg, scale: float) -> None:
+    actor = cfg.observations["actor"]
+    actor.enable_corruption = scale > 0
+    if scale == 0:
+        return
+    amplitudes = {
+        "base_lin_vel": 0.08,
+        "base_ang_vel": 0.05,
+        "projected_gravity": 0.02,
+        "joint_pos": 0.005,
+        "joint_vel": 0.10,
+    }
+    for name, amplitude in amplitudes.items():
+        actor.terms[name].noise = UniformNoiseCfg(n_min=-scale * amplitude, n_max=scale * amplitude)
+
+
 def _base_sprint_env_cfg(play: bool):
     cfg = z01_std_add_head_flat_env_cfg(play=play)
     apply_walking_profile(cfg)
     cfg.curriculum.pop("command_vel", None)
     cfg.events["reset_base"].params.update(pose_range={}, velocity_range={})
     cfg.events["reset_robot_joints"].params.update(
-        position_range=(-0.03, 0.03), velocity_range=(-0.05, 0.05)
+        position_range=(-0.03, 0.03),
+        velocity_range=(-0.05, 0.05),
+        asset_cfg=SceneEntityCfg("robot", joint_names=(MOVING_JOINTS,)),
     )
+    cfg.events["reset_held_joints"] = EventTermCfg(
+        func=env_mdp.reset_joints_by_offset,
+        mode="reset",
+        params={
+            "position_range": (0.0, 0.0),
+            "velocity_range": (0.0, 0.0),
+            "asset_cfg": SceneEntityCfg("robot", joint_names=(HELD_JOINTS,)),
+        },
+    )
+    for name in ("joint_offset", "encoder_bias"):
+        cfg.events[name].params["asset_cfg"] = SceneEntityCfg("robot", joint_names=(MOVING_JOINTS,))
     cfg.events.pop("push_robot", None)
     cfg.observations["actor"].enable_corruption = False
     cfg.rewards.pop("foot_gait", None)
@@ -126,7 +171,7 @@ def _ball_spec() -> mujoco.MjSpec:
 
 @dataclass(kw_only=True)
 class StraightBallSprintCommandCfg(CommandTermCfg):
-    speed_cap: float = 2.8
+    speed_cap: float = STABILITY_SPEED
     ball_distance_range: tuple[float, float] = (5.0, 11.0)
 
     def build(self, env):
@@ -139,14 +184,10 @@ class StraightBallSprintCommand(CommandTerm):
         self._command = torch.zeros((self.num_envs, 3), device=self.device)
         self._speed = torch.full((self.num_envs,), cfg.speed_cap, device=self.device)
         self.ball_spawn_xy = torch.zeros((self.num_envs, 2), device=self.device)
-        self.fast_steps = torch.zeros(self.num_envs, dtype=torch.long, device=self.device)
-        self.stop_steps = torch.zeros_like(self.fast_steps)
-        self.held_sprint = torch.zeros_like(self.fast_steps, dtype=torch.bool)
-        self.sprint_steps_required = math.ceil(SPRINT_HOLD_SECONDS / env.step_dt)
+        self.stop_steps = torch.zeros(self.num_envs, dtype=torch.long, device=self.device)
         self.stop_steps_required = math.ceil(0.4 / env.step_dt)
         self.metrics["peak_forward_mps"] = torch.zeros_like(self._speed)
         self.metrics["target_speed_mps"] = torch.zeros_like(self._speed)
-        self.metrics["sustained_4_mps"] = torch.zeros_like(self._speed)
 
     @property
     def command(self):
@@ -155,9 +196,7 @@ class StraightBallSprintCommand(CommandTerm):
     def _resample_command(self, env_ids):
         self._command[env_ids] = 0.0
         self._command[env_ids, 0] = self.cfg.speed_cap
-        self.fast_steps[env_ids] = 0
         self.stop_steps[env_ids] = 0
-        self.held_sprint[env_ids] = False
 
     def _update_command(self):
         env = self._env
@@ -177,14 +216,11 @@ class StraightBallSprintCommand(CommandTerm):
     def record_step(self):
         robot = self._env.scene["robot"].data
         forward = robot.root_link_lin_vel_w[:, 0]
-        self.fast_steps.copy_(torch.where(forward >= SPRINT_SPEED, self.fast_steps + 1, 0))
-        self.held_sprint.logical_or_(self.fast_steps >= self.sprint_steps_required)
         self.stop_steps.copy_(torch.where(self.in_stop_zone(), self.stop_steps + 1, 0))
         self.metrics["peak_forward_mps"].copy_(
             torch.maximum(self.metrics["peak_forward_mps"], forward)
         )
         self.metrics["target_speed_mps"].copy_(self._speed)
-        self.metrics["sustained_4_mps"].copy_(self.held_sprint)
 
     def in_stop_zone(self):
         robot = self._env.scene["robot"].data
@@ -193,9 +229,12 @@ class StraightBallSprintCommand(CommandTerm):
         return (
             (offset[:, 0] >= 0.35)
             & (offset.norm(dim=1) <= 1.0)
+            & (offset[:, 1].abs() <= 0.25)
+            & (wrap_to_pi(robot.heading_w).abs() <= STOP_HEADING_RAD)
             & (robot.root_link_lin_vel_w[:, :2].norm(dim=1) < 0.25)
             & (robot.projected_gravity_b[:, 2] < -0.9)
             & ~self.missed_ball()
+            & ~self._env.termination_manager.get_term("ball_touched")
         )
 
     def missed_ball(self):
@@ -225,21 +264,33 @@ def settled_at_ball(env):
     command = env.command_manager.get_term("twist")
     # The termination manager evaluates this once after physics and before reset.
     command.record_step()
-    return (command.stop_steps >= command.stop_steps_required) & command.in_stop_zone()
+    return command.stop_steps >= command.stop_steps_required
 
 
-def sprint_and_stop(env):
-    command = env.command_manager.get_term("twist")
-    return command.held_sprint & env.termination_manager.get_term("ball_reached")
+def ball_touched(env):
+    contact = env.scene[BALL_CONTACT_SENSOR].data
+    # Found covers the latest substep. Force history catches brief impacts.
+    return (contact.found > 0).any(dim=1) | (contact.force_history != 0).any(dim=(1, 2, 3))
 
 
 def missed_ball(env):
     return env.command_manager.get_term("twist").missed_ball()
 
 
-def sprint_success_reward(env):
-    terminations = env.termination_manager
-    return terminations.get_term("sprint_success") & ~terminations.get_term("fell_over")
+def ball_touch_penalty(env):
+    return env.termination_manager.get_term("ball_touched")
+
+
+def lane_tracking_error(env):
+    robot = env.scene["robot"].data
+    lateral = robot.root_link_pos_w[:, 1] - env.scene.env_origins[:, 1]
+    sideways_speed = robot.root_link_lin_vel_w[:, 1]
+    heading = wrap_to_pi(robot.heading_w)
+    return (
+        (lateral / 0.30).square().clamp_max(4.0)
+        + (sideways_speed / 0.40).square().clamp_max(4.0)
+        + (heading / math.radians(15)).square().clamp_max(4.0)
+    ) / 3.0
 
 
 def sprint_progress(env):
@@ -273,9 +324,10 @@ def arrival_bonus(env):
 
 def failed_attempt(env):
     terms = env.termination_manager
-    return terms.get_term("fell_over") | terms.get_term("missed_ball") | (
+    failed = terms.get_term("fell_over") | terms.get_term("missed_ball") | (
         terms.get_term("time_out") & ~terms.get_term("ball_reached")
     )
+    return failed & ~terms.get_term("ball_touched")
 
 
 def stalled_away_from_ball(env):
@@ -283,31 +335,6 @@ def stalled_away_from_ball(env):
     command = env.command_manager.get_term("twist")
     gap = command.ball_spawn_xy[:, 0] - robot.root_link_pos_w[:, 0]
     return (gap > 1.0) * (1.0 - robot.root_link_lin_vel_w[:, 0].clamp(0.0, 1.0))
-
-
-def sprinting(env):
-    command = env.command_manager.get_command("twist")[:, 0]
-    forward = env.scene["robot"].data.root_link_lin_vel_b[:, 0]
-    return (command > 1.8) & (forward > 1.6)
-
-
-def sprint_flight(env):
-    air_time = env.scene["feet_ground_contact"].data.current_air_time
-    newest = air_time.min(dim=1).values
-    staggered = (air_time[:, 0] - air_time[:, 1]).abs() > 0.05
-    return sprinting(env) * (newest > 0.0) * (newest < 0.12) * staggered
-
-
-def sprint_footfall(env, asset_cfg):
-    sensor = env.scene["feet_ground_contact"]
-    robot = env.scene["robot"].data
-    feet = robot.site_pos_w[:, asset_cfg.site_ids]
-    separation = quat_apply_inverse(robot.root_link_quat_w, feet[:, 0] - feet[:, 1])[:, 0]
-    lead = torch.stack((separation, -separation), dim=1)
-    alternating = sensor.data.current_air_time.flip(dims=(1,)) > 0.02
-    landings = sensor.compute_first_contact(env.step_dt) & alternating
-    reach = ((lead - 0.12) / 0.30).clamp(0.0, 1.0)
-    return sprinting(env) * (landings * reach).sum(dim=1)
 
 
 class TorsoImpulse(env_mdp.apply_body_impulse):
@@ -329,11 +356,14 @@ def ball_approach_env_cfg(play=False):
     cfg = _base_sprint_env_cfg(play)
     cfg.rewards["walking_stall"] = RewardTermCfg(func=walking_stall, weight=-2.0)
     cfg.events["foot_friction"].mode = "reset"
-    cfg.events["foot_friction"].params["ranges"] = (0.35, 1.15)
+    set_foot_friction(cfg, DEFAULT_FOOT_FRICTION)
     cfg.events["joint_damping"].params["ranges"] = (0.04, 0.27)
     if not play:
         cfg.events["reset_base"].params.update(
-            pose_range={"roll": (-0.03, 0.03), "pitch": (-0.03, 0.03), "yaw": (-0.06, 0.06)},
+            pose_range={
+                "y": (-0.12, 0.12),
+                "roll": (-0.03, 0.03), "pitch": (-0.03, 0.03), "yaw": (-0.06, 0.06),
+            },
             velocity_range={"x": (-0.08, 0.08), "y": (-0.08, 0.08)},
         )
         cfg.events["torso_impulse"] = EventTermCfg(
@@ -353,17 +383,25 @@ def ball_approach_env_cfg(play=False):
     cfg.viewer.distance = 5.0
     cfg.commands["twist"] = StraightBallSprintCommandCfg(
         resampling_time_range=(100.0, 100.0),
-        speed_cap=MAX_COMMAND_SPEED if play else 2.8,
     )
     cfg.scene.entities["ball"] = EntityCfg(
         spec_fn=_ball_spec,
         init_state=EntityCfg.InitialStateCfg(pos=(5.0, 0.0, BALL_RADIUS)),
     )
+    cfg.scene.sensors += (
+        ContactSensorCfg(
+            name=BALL_CONTACT_SENSOR,
+            primary=ContactMatch(mode="geom", pattern="ball_geom", entity="ball"),
+            secondary=ContactMatch(mode="subtree", pattern=_ROOT_BODY_NAME, entity="robot"),
+            fields=("found", "force"),
+            reduce="maxforce",
+            history_length=cfg.decimation,
+        ),
+    )
     cfg.events["reset_ball"] = EventTermCfg(func=reset_straight_ball, mode="reset")
     cfg.terminations.update(
+        ball_touched=TerminationTermCfg(func=ball_touched),
         ball_reached=TerminationTermCfg(func=settled_at_ball),
-        # Read the clean-stop result from this step, after its counters update.
-        sprint_success=TerminationTermCfg(func=sprint_and_stop),
         missed_ball=TerminationTermCfg(func=missed_ball),
     )
     cfg.rewards["track_linear_velocity"].params["std"] = 0.65
@@ -375,16 +413,9 @@ def ball_approach_env_cfg(play=False):
         ball_arrival=RewardTermCfg(func=arrival_bonus, weight=24.0 * terminal_scale),
         settle_at_ball=RewardTermCfg(func=settle_reward, weight=0.8),
         brake_tracking=RewardTermCfg(func=brake_tracking_error, weight=-1.0),
-        sprint_success=RewardTermCfg(func=sprint_success_reward, weight=12.0 * terminal_scale),
+        lane_tracking=RewardTermCfg(func=lane_tracking_error, weight=-2.0),
+        ball_touch=RewardTermCfg(func=ball_touch_penalty, weight=-25.0 * terminal_scale),
         failed_attempt=RewardTermCfg(func=failed_attempt, weight=-10.0 * terminal_scale),
         stalled_away=RewardTermCfg(func=stalled_away_from_ball, weight=-4.0),
-        sprint_flight=RewardTermCfg(func=sprint_flight, weight=1.1),
-        sprint_footfall=RewardTermCfg(
-            func=sprint_footfall,
-            weight=7.0,
-            params={"asset_cfg": SceneEntityCfg(
-                "robot", site_names=("left_foot", "right_foot"), preserve_order=True,
-            )},
-        ),
     )
     return cfg

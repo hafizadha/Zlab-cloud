@@ -12,7 +12,7 @@ sys.path[:0] = [_SRC_DIR, _PROJECT_ROOT]
 
 from mjlab.utils.wrappers import VideoRecorder
 from mjlab.utils.torch import configure_torch_backends
-from mjlab.utils.os import dump_yaml, get_checkpoint_path
+from mjlab.utils.os import dump_yaml
 from mjlab.utils.gpu import select_gpus
 from mjlab.tasks.registry import load_env_cfg, load_rl_cfg, load_runner_cls
 from mjlab.rl import MjlabOnPolicyRunner, RslRlBaseRunnerCfg, RslRlVecEnvWrapper
@@ -23,15 +23,15 @@ import torch
 import tyro
 from src.tasks.velocity.config.z01_std_add_head import TASK_ID
 from src.tasks.velocity.config.z01_std_add_head.ball_sprint import (
-    MAX_COMMAND_SPEED, check_sprint_checkpoint, set_push_strength,
+    CHECKPOINT_TASK, DEFAULT_FOOT_FRICTION, STABILITY_SPEED, STABILITY_STAGE,
+    set_foot_friction, set_observation_noise, set_push_strength,
 )
 from typing import Literal
 from pathlib import Path
 from datetime import datetime
 from dataclasses import asdict, dataclass, field
-import sys
 import logging
-import os
+import math
 
 os.environ.setdefault("__EGL_VENDOR_LIBRARY_FILENAMES",
                       "/usr/share/glvnd/egl_vendor.d/50_mesa.json")
@@ -41,8 +41,10 @@ os.environ.setdefault("MUJOCO_GL", "egl")
 class TrainConfig:
     env: ManagerBasedRlEnvCfg
     agent: RslRlBaseRunnerCfg
-    init_actor_checkpoint: Path | None = None
-    command_speed: float = 2.8
+    checkpoint: Path | None = None
+    observation_noise_scale: float = 0.0
+    foot_friction_min: float = DEFAULT_FOOT_FRICTION[0]
+    foot_friction_max: float = DEFAULT_FOOT_FRICTION[1]
     torso_push_scale: float = 0.0
     video: bool = False
     video_length: int = 200
@@ -63,14 +65,20 @@ class TrainConfig:
 
 
 def run_train(task_id: str, cfg: TrainConfig, log_dir: Path) -> None:
-    if cfg.init_actor_checkpoint is not None and cfg.agent.resume:
-        raise ValueError("--init-actor-checkpoint and --agent.resume are mutually exclusive.")
-    if not 2.6 <= cfg.command_speed <= MAX_COMMAND_SPEED:
-        raise ValueError("--command-speed must be between 2.6 and 4.4 m/s.")
-    cfg.env.commands["twist"].speed_cap = cfg.command_speed
-    if not 0.0 <= cfg.torso_push_scale <= 1.0:
-        raise ValueError("--torso-push-scale must be between 0 and 1.")
+    if cfg.checkpoint is None:
+        raise ValueError("Supply checkpoint 1400 or a saved stability checkpoint with --checkpoint.")
+    checkpoint = cfg.checkpoint.expanduser().resolve(strict=True)
+    state = torch.load(checkpoint, map_location="cpu", weights_only=True)
+    info = state.get("infos") or {}
+    continuing = info.get("stage") == STABILITY_STAGE
+    if info.get("task") != CHECKPOINT_TASK or not (continuing or state.get("iter") == 1400):
+        raise ValueError("Expected the original straight BallSprint checkpoint 1400 or a stability checkpoint.")
+    if not 0.0 <= cfg.torso_push_scale <= 1.0 or not 0.0 <= cfg.observation_noise_scale <= 1.0:
+        raise ValueError("Torso push and observation noise scales must be between 0 and 1.")
+    cfg.env.commands["twist"].speed_cap = STABILITY_SPEED
     set_push_strength(cfg.env, cfg.torso_push_scale)
+    set_observation_noise(cfg.env, cfg.observation_noise_scale)
+    set_foot_friction(cfg.env, (cfg.foot_friction_min, cfg.foot_friction_max))
 
     cuda_visible = os.environ.get("CUDA_VISIBLE_DEVICES", "")
     if cuda_visible == "":
@@ -105,27 +113,10 @@ def run_train(task_id: str, cfg: TrainConfig, log_dir: Path) -> None:
         print(
             f"[INFO] {task_id}: ball {command.ball_distance_range} m straight ahead, "
             f"command cap {command.speed_cap:g} m/s, "
-            f"torso push scale {cfg.torso_push_scale:g}"
+            f"torso push scale {cfg.torso_push_scale:g}, "
+            f"observation noise scale {cfg.observation_noise_scale:g}"
         )
     checkpoint_uploader = HuggingFaceCheckpoints.from_environment(log_dir.name) if rank == 0 else None
-
-    # Go up from specific run dir to experiment dir.
-    log_root_path = log_dir.parent
-
-    resume_path: Path | None = None
-    if cfg.agent.resume:
-        # Load checkpoint from local filesystem.
-        # If --agent.load-checkpoint is an existing absolute path, use it
-        # directly. Otherwise resolve via
-        # <log_root>/rsl_rl/<experiment_name>/<load_run>/<load_checkpoint>.
-        ckpt = Path(cfg.agent.load_checkpoint).expanduser()
-        if ckpt.is_absolute() and ckpt.is_file():
-            resume_path = ckpt
-        else:
-            resume_path = get_checkpoint_path(
-                log_root_path, cfg.agent.load_run, cfg.agent.load_checkpoint
-            )
-        check_sprint_checkpoint(resume_path)
 
     env = ManagerBasedRlEnv(
         cfg=cfg.env, device=device, render_mode="rgb_array" if cfg.video else None
@@ -157,16 +148,18 @@ def run_train(task_id: str, cfg: TrainConfig, log_dir: Path) -> None:
     runner = runner_cls(env, agent_cfg, str(log_dir), device, **runner_kwargs)
 
     runner.add_git_repo_to_log(__file__)
-    if resume_path is not None:
-        print(f"[INFO]: Loading model checkpoint from: {resume_path}")
-        runner.load(str(resume_path), map_location="cpu")
-        # A saved iteration already completed its PPO update.
-        runner.current_learning_iteration += 1
-    elif cfg.init_actor_checkpoint is not None:
-        checkpoint = cfg.init_actor_checkpoint.expanduser().resolve(strict=True)
-        state = torch.load(checkpoint, map_location="cpu", weights_only=True)
-        runner.alg.get_policy().load_state_dict(state["actor_state_dict"], strict=True)
-        print(f"[INFO] Initialized actor from {checkpoint}.")
+    # Warm-start the actor for the new reward/actuator setup. Refit the critic
+    # from scratch so old sprint returns and optimizer moments do not carry over.
+    runner.alg.load(state, {"actor": True, "critic": continuing}, strict=True)
+    if continuing:
+        runner.current_learning_iteration = state["iter"] + 1
+    else:
+        # Reduce stochastic exploration for the first stability block.
+        with torch.no_grad():
+            distribution = runner.alg.get_policy().distribution
+            distribution.std_param.clamp_(max=math.log(math.expm1(0.12)))
+    print(f"[INFO] {'Continued stability training' if continuing else 'Warm-started actor'} from {checkpoint}.")
+    del state
 
     # Only write config files from rank 0 to avoid race conditions.
     if rank == 0:
