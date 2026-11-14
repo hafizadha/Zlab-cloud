@@ -5,18 +5,10 @@ import sys
 import os
 
 _PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-# [2026-08-18] Prepend the repo's `src/` dir to sys.path BEFORE importing
-#   mjlab/rsl_rl so the local, patched `rsl_rl` (under src/rsl_rl) takes precedence
-#   over a stale copy installed in site-packages.
-#   The stale copy caused two problems on the training machine:
-#     1. `rsl_rl` resolved to /usr/local/lib/python3.11/site-packages/rsl_rl, so the
-#        entropy-annealing / std-clamp fixes in src/rsl_rl were never loaded.
-#     2. Its scalar std_param is unbounded and drifted negative, crashing
-#        `Normal.sample()` with "normal expects all elements of std >= 0.0".
+# Load the bundled RSL-RL before importing mjlab. Its Gaussian distribution
+# applies softplus to the seed checkpoint's exploration parameters.
 _SRC_DIR = os.path.join(_PROJECT_ROOT, "src")
-for _p in (_SRC_DIR, _PROJECT_ROOT):
-    if _p not in sys.path:
-        sys.path.insert(0, _p)
+sys.path[:0] = [_SRC_DIR, _PROJECT_ROOT]
 
 from mjlab.utils.wrappers import VideoRecorder
 from mjlab.utils.torch import configure_torch_backends
@@ -223,6 +215,13 @@ def launch_training(task_id: str, args: TrainConfig | None = None):
         # Multi-GPU: use torchrunx.
         import torchrunx
 
+        # Torchrunx starts a fresh Python interpreter. It can import RSL-RL
+        # while deserializing the training config, before run_train executes.
+        python_path = [_SRC_DIR, _PROJECT_ROOT]
+        if os.environ.get("PYTHONPATH"):
+            python_path.append(os.environ["PYTHONPATH"])
+        os.environ["PYTHONPATH"] = os.pathsep.join(python_path)
+
         # torchrunx redirects stdout to logging.
         logging.basicConfig(level=logging.INFO)
 
@@ -241,8 +240,10 @@ def launch_training(task_id: str, args: TrainConfig | None = None):
             hostnames=["localhost"],
             workers_per_host=num_gpus,
             backend=None,  # Let rsl_rl handle process group initialization.
-            copy_env_vars=torchrunx.DEFAULT_ENV_VARS_FOR_COPY
-            + ("MUJOCO*", "WARP*", "MJLAB_WARP_QUIET", "OMP_NUM_THREADS", "ZLAB_NOTEBOOK_PROGRESS"),
+            copy_env_vars=torchrunx.DEFAULT_ENV_VARS_FOR_COPY + (
+                "PYTHONPATH", "MUJOCO*", "WARP*", "MJLAB_WARP_QUIET",
+                "OMP_NUM_THREADS", "ZLAB_NOTEBOOK_PROGRESS",
+            ),
         ).run(run_train, task_id, args, log_dir)
 
 
