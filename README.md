@@ -15,9 +15,9 @@ The robot uses its existing position servos to hold the targets.
 ## Kaggle T4 training
 
 Open [zlab-training.ipynb](zlab-training.ipynb) with a GPU accelerator and
-Internet access. Attach `model_1400.pt` as a Kaggle input or specify its path
-in the training cell. The notebook clones `main` and runs for a budget of nine
-hours by default, or until all stability profiles pass. Kaggle can end the
+Internet access. The notebook clones `main` and starts from the bundled
+`Zlab_Gym/checkpoints/model_1400.pt`. Training runs for a budget of nine hours
+by default, or until all stability profiles pass. Kaggle can end the
 session according to its own runtime and quota limits.
 
 The notebook uses 128 environments per visible T4, 100 updates per block,
@@ -73,14 +73,14 @@ Run a single block with Python 3.10–3.13, CUDA PyTorch and `flock`.
 ```bash
 cd Zlab_Gym
 python -m pip install -e . onnx
-./train_ball_stability.sh /absolute/path/to/model_1400.pt 100 128
+./train_ball_stability.sh checkpoints/model_1400.pt 100 128
 ```
 
 Set `ZLAB_TORSO_PUSH_SCALE` and `ZLAB_OBSERVATION_NOISE_SCALE` for a manual
 robustness block. The automated blocks can also run outside Kaggle.
 
 ```bash
-python scripts/train_stability_blocks.py /absolute/path/to/model_1400.pt \
+python scripts/train_stability_blocks.py checkpoints/model_1400.pt \
   --work-dir logs/stability-blocks --hours 9
 ```
 
