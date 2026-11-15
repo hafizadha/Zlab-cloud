@@ -11,6 +11,7 @@ from dataclasses import asdict, dataclass
 from typing import Callable
 
 import mjlab
+import numpy as np
 import torch
 import tyro
 from mjlab.envs import ManagerBasedRlEnv
@@ -19,11 +20,12 @@ from mjlab.tasks.registry import load_env_cfg, load_rl_cfg, load_runner_cls
 from mjlab.utils.torch import configure_torch_backends
 from mjlab.utils.lab_api.math import wrap_to_pi
 from mjlab.viewer import NativeMujocoViewer, ViserPlayViewer
+from mjlab.viewer.debug_visualizer import DebugVisualizer
 
 import src.tasks  # noqa: F401
 from src.tasks.velocity.config.z01_std_add_head import TASK_ID
 from src.tasks.velocity.config.z01_std_add_head.ball_sprint import (
-    DEFAULT_FOOT_FRICTION, PITCH_START_X, STABILITY_SPEED,
+    DEFAULT_FOOT_FRICTION, PITCH_HALF_LENGTH, PITCH_HALF_WIDTH, PITCH_START_X, STABILITY_SPEED,
     set_foot_friction, set_observation_noise, set_push_strength,
 )
 
@@ -36,15 +38,35 @@ class PlayConfig:
     seed: int = 2026
     eval_episodes: int = 0
     """Run this many seeded ball-approach trials headlessly."""
-    disturbances: bool = False
-    """Include the training torso impulses and randomized starting pose."""
-    torso_push_scale: float = 1.0
-    """Set impulse strength when disturbances are enabled."""
+    disturbances: bool | None = None
+    """Randomize starting pose. Interactive playback defaults to the cloud pilot profile."""
+    torso_push_scale: float | None = None
+    """Set impulse strength when disturbances are enabled. The cloud pilot uses zero."""
     observation_noise_scale: float = 0.0
     foot_friction_min: float = DEFAULT_FOOT_FRICTION[0]
     foot_friction_max: float = DEFAULT_FOOT_FRICTION[1]
     metrics_file: Path | None = None
-    lateral_correction: bool = False
+    lateral_correction: bool | None = None
+    """Steer back toward the ball's lane. Enabled by default in interactive playback."""
+
+
+_PITCH_CORNERS = np.array([
+    (-PITCH_HALF_LENGTH, -PITCH_HALF_WIDTH, 0.005),
+    (PITCH_HALF_LENGTH, -PITCH_HALF_WIDTH, 0.005),
+    (PITCH_HALF_LENGTH, PITCH_HALF_WIDTH, 0.005),
+    (-PITCH_HALF_LENGTH, PITCH_HALF_WIDTH, 0.005),
+])
+_PITCH_LINES = (
+    *zip(_PITCH_CORNERS, np.roll(_PITCH_CORNERS, -1, axis=0)),
+    ((_PITCH_CORNERS[0] + _PITCH_CORNERS[1]) / 2, (_PITCH_CORNERS[2] + _PITCH_CORNERS[3]) / 2),
+)
+
+
+class RoboCupPlaybackEnv(ManagerBasedRlEnv):
+    def update_visualizers(self, visualizer: DebugVisualizer) -> None:
+        super().update_visualizers(visualizer)
+        for start, end in _PITCH_LINES:
+            visualizer.add_cylinder(start, end, radius=0.035, color=(0.92, 0.95, 0.92, 1.0))
 
 
 def run_play(cfg: PlayConfig) -> None:
@@ -53,24 +75,34 @@ def run_play(cfg: PlayConfig) -> None:
         raise ValueError("num-envs must be positive.")
     if cfg.eval_episodes < 0:
         raise ValueError("eval-episodes cannot be negative.")
-    if not 0.0 <= cfg.torso_push_scale <= 1.0 or not 0.0 <= cfg.observation_noise_scale <= 1.0:
+    interactive = cfg.eval_episodes == 0
+    disturbances = interactive if cfg.disturbances is None else cfg.disturbances
+    push_scale = cfg.torso_push_scale
+    if push_scale is None:
+        push_scale = 0.0 if interactive and cfg.disturbances is None else 1.0
+    if not 0.0 <= push_scale <= 1.0 or not 0.0 <= cfg.observation_noise_scale <= 1.0:
         raise ValueError("Torso push and observation noise scales must be between 0 and 1.")
     configure_torch_backends()
     device = cfg.device or ("cuda:0" if torch.cuda.is_available() else "cpu")
-    env_cfg = load_env_cfg(TASK_ID, play=not cfg.disturbances)
-    if cfg.disturbances:
-        set_push_strength(env_cfg, cfg.torso_push_scale)
+    env_cfg = load_env_cfg(TASK_ID, play=not disturbances)
+    if disturbances:
+        set_push_strength(env_cfg, push_scale)
     set_observation_noise(env_cfg, cfg.observation_noise_scale)
     set_foot_friction(env_cfg, (cfg.foot_friction_min, cfg.foot_friction_max))
-    env_cfg.commands["twist"].lateral_correction = cfg.lateral_correction
+    env_cfg.commands["twist"].lateral_correction = (
+        interactive if cfg.lateral_correction is None else cfg.lateral_correction
+    )
     env_cfg.scene.num_envs = cfg.num_envs
     env_cfg.seed = cfg.seed
     rl_cfg = load_rl_cfg(TASK_ID)
-    env = RslRlVecEnvWrapper(
-        ManagerBasedRlEnv(cfg=env_cfg, device=device),
-        clip_actions=rl_cfg.clip_actions,
-    )
+    env_type = RoboCupPlaybackEnv if interactive else ManagerBasedRlEnv
+    env = RslRlVecEnvWrapper(env_type(cfg=env_cfg, device=device), clip_actions=rl_cfg.clip_actions)
     try:
+        if interactive:
+            # Color only the viewer's floor. The physics model keeps the cloud terrain.
+            ground = env.unwrapped.sim.mj_model.geom("terrain")
+            ground.matid[:] = -1
+            ground.rgba[:] = (0.13, 0.34, 0.19, 1.0)
         runner = load_runner_cls(TASK_ID)(env, asdict(rl_cfg), device=device)
         state = torch.load(checkpoint, map_location="cpu", weights_only=True)
         runner.alg.get_policy().load_state_dict(state["actor_state_dict"], strict=True)

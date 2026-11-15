@@ -13,32 +13,20 @@ targets. The actor still has 29 action channels so checkpoint 1400 can load.
 The exported ONNX metadata carries a zero action scale for each held joint.
 The robot uses its existing position servos to hold the targets.
 
-## Kaggle T4 training
+## Kaggle T4 validation
 
 Open [zlab-training.ipynb](zlab-training.ipynb) in Kaggle, select a T4 GPU,
-and run all cells. The notebook clones `main` and starts from the bundled
-`Zlab_Gym/checkpoints/model_999.pt`. The lateral pilot adds body-frame
-sideways correction capped at 0.35 m/s through the existing lateral
-velocity command. The forward speed cap and braking curve stay the same.
-It also scores checkpoint 699 for reference. Compare against the starting model
-in the same report since all checkpoints use the new controller.
+enable Internet, and run all cells. The notebook clones `main` and evaluates
+checkpoints 1199 and 999 on fresh seeds 27491 and 36187, with 48 full-length
+2.8 m/s approaches per checkpoint per seed. Both checkpoints use lateral
+correction and the same traction range, with torso pushes and sensor noise off.
 
-The default pilot runs one block of 300 updates at 512 environments per GPU.
-During training, 35% of resets place the ball 1.5–3 m ahead and
-0.35–0.75 m to either side of the nominal starting lane. The robot starts
-with 0.35–0.90 m/s of forward velocity and uses the ball's lateral position
-as its lane target. The remaining resets keep the normal 5–11 m approach. Every evaluation uses full-length approaches with pushes and noise
-disabled. A candidate must earn more clean stops and fewer timeouts on each
-of two 48-trial seeds. The lateral pilot also requires fewer timeouts
-outside the lateral band on each seed. Falls and touches must stay at or below the starting
-checkpoint’s counts on each seed, and lane drift may increase by at most 5 cm.
-The pilot stops after the first block with no qualifying checkpoint.
-
-Read `progress.json` in `/kaggle/working/zlab-robocup-braking-alignment-pilot` for
-the selected checkpoint and the path to `comparison.json`. The report
-includes the checkpoint 699 control, crossed-foot incidence, and overlapping
-timeout counts for gap, lateral offset, yaw, and speed. Start a new work
-directory when changing traction.
+Checkpoint 1199 must gain clean stops overall, match or beat 999's clean stops,
+fall count and 95th-percentile lane offset on each seed, and incur no more ball
+touches across both seeds. The notebook saves the paired results and gate outcomes
+to `/kaggle/working/zlab-robocup-1199-validation/validation.json` and the selected
+weights to `selected.pt` in the same directory. This run evaluates the existing
+checkpoints without PPO updates.
 
 ### Rewards for the running approach and stop
 
@@ -55,8 +43,8 @@ directory when changing traction.
   claim that successful stops establish a human running gait. Check stride
   alternation and foot clearance in replay before adding stronger disturbances.
 
-For optional Hugging Face backups, supply a write-capable `HF_TOKEN` in
-Kaggle Secrets and enable uploads in the notebook. Periodic training
+For optional Hugging Face backups during training, configure the uploader with
+a write-capable `HF_TOKEN`. Periodic training
 checkpoints are stored under `checkpoints/<run-name>/model_<iteration>.pt`.
 The selection file identifies which checkpoint to use.
 

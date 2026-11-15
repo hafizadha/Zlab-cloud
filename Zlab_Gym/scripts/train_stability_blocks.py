@@ -18,6 +18,7 @@ PROFILES = ((0.0, 0.0), (0.25, 0.25), (0.5, 0.5), (1.0, 1.0))
 EPISODES = 48
 EVALUATION_SEED = 2401
 PILOT_SEEDS = (EVALUATION_SEED, 9187)
+VALIDATION_SEEDS = (27491, 36187)
 
 
 def evaluate(checkpoint, block_dir, name, profile, *, seed=EVALUATION_SEED, lateral_correction=False):
@@ -59,6 +60,39 @@ def save_state(state_file, state):
     pending = state_file.with_suffix(".tmp")
     pending.write_text(json.dumps(state, indent=2) + "\n")
     pending.replace(state_file)
+
+
+def validate_candidate(checkpoint, control, work_dir):
+    report = {
+        "seeds": VALIDATION_SEEDS,
+        "episodes_per_seed": EPISODES,
+        "foot_friction": [float(os.environ.get("ZLAB_FOOT_FRICTION_MIN", "0.35")),
+                          float(os.environ.get("ZLAB_FOOT_FRICTION_MAX", "1.15"))],
+    }
+    for name, path in (("control", control), ("candidate", checkpoint)):
+        report[name] = {"checkpoint": str(path), "reports": [
+            evaluate(path, work_dir, f"{name}-seed-{seed}", PROFILES[0],
+                     seed=seed, lateral_correction=True)
+            for seed in VALIDATION_SEEDS
+        ]}
+    candidate = report["candidate"]["reports"]
+    baseline = report["control"]["reports"]
+    paired = list(zip(candidate, baseline, strict=True))
+    criteria = {
+        "more_clean_stops_overall": sum(r["stops"] for r in candidate) > sum(r["stops"] for r in baseline),
+        "clean_stops_no_regression_by_seed": all(new["stops"] >= old["stops"] for new, old in paired),
+        "falls_no_regression_by_seed": all(new["falls"] <= old["falls"] for new, old in paired),
+        "no_more_ball_touches_overall": sum(r["touches"] for r in candidate) <= sum(r["touches"] for r in baseline),
+        "lane_offset_no_regression_by_seed": all(
+            new["lane_offset_p95_m"] <= old["lane_offset_p95_m"] for new, old in paired
+        ),
+    }
+    report["promotion_criteria"] = criteria
+    selected = checkpoint if all(criteria.values()) else control
+    report["selected_checkpoint"] = str(selected)
+    shutil.copyfile(selected, work_dir / "selected.pt")
+    save_state(work_dir / "validation.json", report)
+    print(f"[BALL STABILITY] Selected {selected.name} after fresh-seed validation.", flush=True)
 
 
 def train_pilot(checkpoint, work_dir, blocks, updates, num_envs, control=None, *, lateral_pilot=False):
@@ -265,6 +299,8 @@ def main():
     parser.add_argument("--lateral-pilot", action="store_true")
     parser.add_argument("--finishing-control", type=Path, metavar="CHECKPOINT",
                         help="Run the finishing curriculum and evaluate this reference checkpoint.")
+    parser.add_argument("--validate-against", type=Path, metavar="CHECKPOINT",
+                        help="Compare the candidate against this control on fresh seeds without PPO.")
     args = parser.parse_args()
     if not 0 < args.hours < float("inf") or min(args.updates, args.num_envs) <= 0:
         parser.error("Use a finite, positive time budget and positive update and environment counts.")
@@ -274,6 +310,8 @@ def main():
         parser.error("--finishing-control requires --pilot-blocks.")
     if args.lateral_pilot and args.finishing_control is None:
         parser.error("--lateral-pilot requires --finishing-control.")
+    if args.validate_against is not None and args.pilot_blocks is not None:
+        parser.error("--validate-against cannot be used with --pilot-blocks.")
     work_dir = args.work_dir.expanduser().resolve()
     work_dir.mkdir(parents=True, exist_ok=True)
     with (work_dir / "training.lock").open("a") as lock:
@@ -282,7 +320,10 @@ def main():
         except BlockingIOError:
             parser.error(f"Training is already running in {work_dir}.")
         checkpoint = args.checkpoint.expanduser().resolve(strict=True)
-        if args.pilot_blocks is None:
+        if args.validate_against is not None:
+            control = args.validate_against.expanduser().resolve(strict=True)
+            validate_candidate(checkpoint, control, work_dir)
+        elif args.pilot_blocks is None:
             train_blocks(checkpoint, work_dir, args.hours, args.updates, args.num_envs)
         else:
             control = args.finishing_control
