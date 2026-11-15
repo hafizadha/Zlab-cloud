@@ -17,6 +17,7 @@ from mjlab.utils.gpu import select_gpus
 from mjlab.tasks.registry import load_env_cfg, load_rl_cfg, load_runner_cls
 from mjlab.rl import MjlabOnPolicyRunner, RslRlBaseRunnerCfg, RslRlVecEnvWrapper
 from mjlab.envs import ManagerBasedRlEnv, ManagerBasedRlEnvCfg
+from mjlab.managers import RewardTermCfg
 from scripts.checkpoint_upload import HuggingFaceCheckpoints
 import mjlab
 import torch
@@ -24,7 +25,7 @@ import tyro
 from src.tasks.velocity.config.z01_std_add_head import TASK_ID
 from src.tasks.velocity.config.z01_std_add_head.ball_sprint import (
     CHECKPOINT_TASK, DEFAULT_FOOT_FRICTION, STABILITY_SPEED, STABILITY_STAGE,
-    set_foot_friction, set_observation_noise, set_push_strength,
+    set_foot_friction, set_observation_noise, set_push_strength, stop_lateral_instability,
 )
 from typing import Literal
 from pathlib import Path
@@ -45,6 +46,7 @@ class TrainConfig:
     observation_noise_scale: float = 0.0
     finishing_start_fraction: float = 0.0
     lateral_correction: bool = False
+    early_braking: bool = False
     foot_friction_min: float = DEFAULT_FOOT_FRICTION[0]
     foot_friction_max: float = DEFAULT_FOOT_FRICTION[1]
     torso_push_scale: float = 0.0
@@ -82,6 +84,11 @@ def run_train(task_id: str, cfg: TrainConfig, log_dir: Path) -> None:
     cfg.env.commands["twist"].speed_cap = STABILITY_SPEED
     cfg.env.commands["twist"].finishing_start_fraction = cfg.finishing_start_fraction
     cfg.env.commands["twist"].lateral_correction = cfg.lateral_correction
+    cfg.env.commands["twist"].early_braking = cfg.early_braking
+    if cfg.early_braking:
+        cfg.env.rewards["stop_lateral_instability"] = RewardTermCfg(
+            func=stop_lateral_instability, weight=-1.5,
+        )
     set_push_strength(cfg.env, cfg.torso_push_scale)
     set_observation_noise(cfg.env, cfg.observation_noise_scale)
     set_foot_friction(cfg.env, (cfg.foot_friction_min, cfg.foot_friction_max))
@@ -122,7 +129,8 @@ def run_train(task_id: str, cfg: TrainConfig, log_dir: Path) -> None:
             f"torso push scale {cfg.torso_push_scale:g}, "
             f"observation noise scale {cfg.observation_noise_scale:g}, "
             f"finishing starts {command.finishing_start_fraction:.0%}, "
-            f"lateral correction {command.lateral_correction}"
+            f"lateral correction {command.lateral_correction}, "
+            f"early braking {command.early_braking}"
         )
     checkpoint_uploader = HuggingFaceCheckpoints.from_environment(log_dir.name) if rank == 0 else None
 

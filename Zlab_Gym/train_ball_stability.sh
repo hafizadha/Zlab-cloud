@@ -39,6 +39,7 @@ exec "${ZLAB_PYTHON:-python}" -u scripts/train.py \
     --agent.max-iterations="$updates" --agent.save-interval="$save_interval" \
     --torso-push-scale="${ZLAB_TORSO_PUSH_SCALE:-0}" \
     --lateral-correction="${ZLAB_LATERAL_CORRECTION:-False}" \
+    --early-braking="${ZLAB_EARLY_BRAKING:-False}" \
     --finishing-start-fraction="${ZLAB_FINISHING_START_FRACTION:-0}" \
     --observation-noise-scale="${ZLAB_OBSERVATION_NOISE_SCALE:-0}" \
     --foot-friction-min="${ZLAB_FOOT_FRICTION_MIN:-0.35}" --foot-friction-max="${ZLAB_FOOT_FRICTION_MAX:-1.15}" \

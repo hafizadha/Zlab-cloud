@@ -48,6 +48,8 @@ class PlayConfig:
     metrics_file: Path | None = None
     lateral_correction: bool | None = None
     """Steer back toward the ball's lane. Enabled by default in interactive playback."""
+    early_braking: bool = False
+    """Start braking earlier and aim for a 0.75 m clearance."""
 
 
 _PITCH_CORNERS = np.array([
@@ -92,6 +94,7 @@ def run_play(cfg: PlayConfig) -> None:
     env_cfg.commands["twist"].lateral_correction = (
         interactive if cfg.lateral_correction is None else cfg.lateral_correction
     )
+    env_cfg.commands["twist"].early_braking = cfg.early_braking
     env_cfg.scene.num_envs = cfg.num_envs
     env_cfg.seed = cfg.seed
     rl_cfg = load_rl_cfg(TASK_ID)

@@ -21,7 +21,8 @@ PILOT_SEEDS = (EVALUATION_SEED, 9187)
 VALIDATION_SEEDS = (27491, 36187)
 
 
-def evaluate(checkpoint, block_dir, name, profile, *, seed=EVALUATION_SEED, lateral_correction=False):
+def evaluate(checkpoint, block_dir, name, profile, *, seed=EVALUATION_SEED,
+             lateral_correction=False, early_braking=False):
     metrics_file = block_dir / f"{name}.json"
     push, noise = profile
     subprocess.run([
@@ -33,6 +34,7 @@ def evaluate(checkpoint, block_dir, name, profile, *, seed=EVALUATION_SEED, late
         "--foot-friction-min", os.environ.get("ZLAB_FOOT_FRICTION_MIN", "0.35"),
         "--foot-friction-max", os.environ.get("ZLAB_FOOT_FRICTION_MAX", "1.15"),
         "--lateral-correction", str(lateral_correction),
+        "--early-braking", str(early_braking),
         "--metrics-file", str(metrics_file),
     ], cwd=PROJECT, check=True)
     return json.loads(metrics_file.read_text())
@@ -119,7 +121,7 @@ def validate_candidate(checkpoint, control, work_dir, alternative=None):
 
 
 def train_pilot(checkpoint, work_dir, blocks, updates, num_envs, control=None, *,
-                lateral_pilot=False, seeds=PILOT_SEEDS, train_seed=42):
+                lateral_pilot=False, seeds=PILOT_SEEDS, train_seed=42, early_braking=False):
     """Evaluate every save and stop after the first block without a better policy."""
     state_file = work_dir / "progress.json"
     finishing_pilot = control is not None
@@ -136,19 +138,21 @@ def train_pilot(checkpoint, work_dir, blocks, updates, num_envs, control=None, *
             raise ValueError("Use a fresh pilot work directory when changing evaluation seeds.")
         if state.get("train_seed", 42) != train_seed:
             raise ValueError("Use a fresh pilot work directory when changing the training seed.")
+        if state.get("early_braking", False) != early_braking:
+            raise ValueError("Use a fresh pilot work directory when changing the braking controller.")
     else:
         baseline = work_dir / "baseline.pt"
         shutil.copyfile(checkpoint, baseline)
         state = {"mode": mode,
                  "checkpoint": str(baseline), "reports": None,
                  "block": 0, "stop_reason": None, "foot_friction": friction,
-                 "seeds": list(seeds), "train_seed": train_seed}
+                 "seeds": list(seeds), "train_seed": train_seed, "early_braking": early_braking}
         save_state(state_file, state)
 
     def evaluate_both(path, directory, name):
         return [
             evaluate(path, directory, f"{name}-seed-{seed}", PROFILES[0],
-                     seed=seed, lateral_correction=lateral_pilot)
+                     seed=seed, lateral_correction=lateral_pilot, early_braking=early_braking)
             for seed in seeds
         ]
 
@@ -170,6 +174,7 @@ def train_pilot(checkpoint, work_dir, blocks, updates, num_envs, control=None, *
             ZLAB_TRAIN_SEED=str(train_seed + block - 1), ZLAB_TORSO_PUSH_SCALE="0",
             ZLAB_OBSERVATION_NOISE_SCALE="0", ZLAB_SAVE_INTERVAL="100",
             ZLAB_LATERAL_CORRECTION=str(lateral_pilot),
+            ZLAB_EARLY_BRAKING=str(early_braking),
             ZLAB_FINISHING_START_FRACTION="0.35" if finishing_pilot else "0",
         )
         subprocess.run([
@@ -208,7 +213,7 @@ def train_pilot(checkpoint, work_dir, blocks, updates, num_envs, control=None, *
                   flush=True)
 
         save_state(directory / "comparison.json", {
-            "seeds": seeds, "baseline": str(incumbent),
+            "seeds": seeds, "baseline": str(incumbent), "early_braking": early_braking,
             "baseline_reports": state["reports"], "candidates": comparisons,
             **({"control_checkpoint": str(control), "control_reports": state["control_reports"]}
                if finishing_pilot else {}),
@@ -329,6 +334,8 @@ def main():
                         metavar=("FIRST", "SECOND"))
     parser.add_argument("--pilot-train-seed", type=int, default=42)
     parser.add_argument("--lateral-pilot", action="store_true")
+    parser.add_argument("--early-braking", action="store_true",
+                        help="Use earlier braking and train lateral stability during the stop.")
     parser.add_argument("--finishing-control", type=Path, metavar="CHECKPOINT",
                         help="Run the finishing curriculum and evaluate this reference checkpoint.")
     parser.add_argument("--validate-against", type=Path, metavar="CHECKPOINT",
@@ -346,6 +353,8 @@ def main():
         parser.error("--finishing-control requires --pilot-blocks.")
     if args.lateral_pilot and args.finishing_control is None:
         parser.error("--lateral-pilot requires --finishing-control.")
+    if args.early_braking and args.pilot_blocks is None:
+        parser.error("--early-braking requires --pilot-blocks.")
     if args.validate_against is not None and args.pilot_blocks is not None:
         parser.error("--validate-against cannot be used with --pilot-blocks.")
     if args.validation_alternative is not None and args.validate_against is None:
@@ -372,7 +381,7 @@ def main():
                 control = control.expanduser().resolve(strict=True)
             train_pilot(checkpoint, work_dir, args.pilot_blocks, args.updates, args.num_envs,
                         control, lateral_pilot=args.lateral_pilot, seeds=args.pilot_seeds,
-                        train_seed=args.pilot_train_seed)
+                        train_seed=args.pilot_train_seed, early_braking=args.early_braking)
 
 
 if __name__ == "__main__":

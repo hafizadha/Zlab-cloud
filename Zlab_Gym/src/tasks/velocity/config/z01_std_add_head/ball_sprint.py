@@ -182,6 +182,7 @@ class StraightBallSprintCommandCfg(CommandTermCfg):
     ball_distance_range: tuple[float, float] = (5.0, 11.0)
     finishing_start_fraction: float = 0.0
     lateral_correction: bool = False
+    early_braking: bool = False
 
     def build(self, env):
         return StraightBallSprintCommand(self, env)
@@ -212,8 +213,9 @@ class StraightBallSprintCommand(CommandTerm):
         env = self._env
         robot = env.scene["robot"].data
         forward_gap = self.ball_spawn_xy[:, 0] - robot.root_link_pos_w[:, 0]
-        remaining = (forward_gap - 0.60).clamp_min(0.0)
-        braking_speed = (7.0 * remaining).sqrt().minimum(1.8 * remaining)
+        target_gap, gain = (0.75, 1.6) if self.cfg.early_braking else (0.60, 1.8)
+        remaining = (forward_gap - target_gap).clamp_min(0.0)
+        braking_speed = (7.0 * remaining).sqrt().minimum(gain * remaining)
         self._command[:, 0] = braking_speed.minimum(self._speed)
 
         lateral = robot.root_link_pos_w[:, 1] - self.ball_spawn_xy[:, 1]
@@ -379,7 +381,8 @@ def settle_reward(env):
     command = env.command_manager.get_term("twist")
     robot = env.scene["robot"].data
     offset = command.ball_spawn_xy - robot.root_link_pos_w[:, :2]
-    position_error = (offset[:, 0] - 0.65).square() + offset[:, 1].square()
+    target_gap = 0.75 if command.cfg.early_braking else 0.65
+    position_error = (offset[:, 0] - target_gap).square() + offset[:, 1].square()
     lateral_error = lateral_velocity_error(robot, command, -offset[:, 1])
     speed_error = robot.root_link_lin_vel_w[:, 0].square() + lateral_error.square()
     return torch.exp(-position_error / 0.45**2 - speed_error / 0.5**2)
@@ -393,7 +396,8 @@ def finishing_reward(env):
     sideways_error = lateral_velocity_error(robot, command, -offset[:, 1])
     heading = wrap_to_pi(robot.heading_w)
     # Near the ball, reward controlled correction and a settled finish.
-    distance = ((offset[:, 0] - 0.65) / 0.9).square()
+    target_gap = 0.75 if command.cfg.early_braking else 0.65
+    distance = ((offset[:, 0] - target_gap) / 0.9).square()
     alignment = (offset[:, 1] / 0.40).square() + (heading / math.radians(20)).square()
     motion = (forward_speed / 0.9).square() + (sideways_error / 0.35).square()
     return torch.exp(-distance - 0.5 * (alignment + motion))
@@ -425,6 +429,17 @@ def backward_drift_near_ball(env):
 def valid_stop_hold(env):
     command = env.command_manager.get_term("twist")
     return (command.stop_steps > 0).float()
+
+
+def stop_lateral_instability(env):
+    command = env.command_manager.get_term("twist")
+    robot = env.scene["robot"].data
+    gap, lateral = (command.ball_spawn_xy - robot.root_link_pos_w[:, :2]).unbind(dim=1)
+    near_ball = ((1.5 - gap) / 0.50).clamp(0.0, 1.0)
+    centered = ((0.35 - lateral.abs()) / 0.15).clamp(0.0, 1.0)
+    lateral_speed = (robot.root_link_lin_vel_w[:, 1] / 0.25).square()
+    tilt = robot.projected_gravity_b[:, :2].square().sum(dim=1) / 0.20**2
+    return near_ball * centered * (lateral_speed + tilt).clamp_max(4.0)
 
 
 def arrival_bonus(env):

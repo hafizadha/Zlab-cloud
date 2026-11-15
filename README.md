@@ -16,23 +16,22 @@ The robot uses its existing position servos to hold the targets.
 ## Kaggle T4 training
 
 Open [zlab-training.ipynb](zlab-training.ipynb), select T4 and run all
-cells. The notebook clones `main` and starts from the original 1199, selected
-in Kaggle version 20 with 59 clean stops, zero falls and three ball touches
-across 96 fresh trials. The pilot runs 300 PPO updates at 512 environments
-per GPU and saves every 100 updates.
+cells. The notebook clones `main`, starts from the validated original 1199,
+and scores 1499 from Kaggle version 21 as a reference. It runs 300 PPO updates
+at 512 environments per GPU and saves every 100 updates.
 
-About 65% of resets are full approaches, 25% start close to the ball
-and off-center with forward motion, and 10% start in the stop zone at
-rest. Training gives dense credit for each valid hold step as well as
-the terminal reward for completing the five-second hold.
+This pilot uses the earlier braking profile tested on 1499. It starts
+deceleration sooner and targets a 0.75 m gap. When the robot is close and
+centered, the training reward penalizes lateral speed and torso tilt to
+help it finish braking and stand. About 65% of resets are full approaches,
+25% are rolling off-center approaches, and 10% start in the stop zone at rest.
 
-Every evaluation uses full approaches at 2.8 m/s with a continuous
-five-second hold, lateral correction and randomized traction. Torso pushes
-and sensor noise are off. The pilot re-evaluates the parent and each save on
-seeds 61007 and 69539, with 999 as a reference. The promotion rules require
-more clean stops and fewer timeouts on both seeds with no increase in falls
-or ball touches. Read `progress.json` and `comparison.json` under
-`/kaggle/working/zlab-robocup-stop-refinement-pilot`.
+The evaluation uses full approaches at 2.8 m/s with the earlier braking
+profile and a continuous five-second hold. It compares each save against
+1199 on seeds 75169 and 85313 and records 1499 as a reference. Read
+`progress.json` and `comparison.json` under
+`/kaggle/working/zlab-robocup-early-braking-pilot`. To preview the pilot's
+controller in `scripts/play.py`, pass `--early-braking True`.
 
 ### Rewards for the running approach and stop
 
