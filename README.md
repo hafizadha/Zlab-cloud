@@ -13,29 +13,26 @@ targets. The actor still has 29 action channels so checkpoint 1400 can load.
 The exported ONNX metadata carries a zero action scale for each held joint.
 The robot uses its existing position servos to hold the targets.
 
-## Kaggle T4 notebook
+## Kaggle T4 training
 
-The default notebook compares 999 and both 1199 checkpoints at 2.8 m/s
-with a five-second hold. It uses 48 trials per checkpoint on each of two
-fresh seeds. A separate diagnostic comparison on seed 2401 measures
-whether failed trials ever entered the stop zone, how long they held,
-and how often they drifted backward after entering. Promotion uses the
-fresh seeds only. The notebook writes `validation.json` and `selected.pt`
-under `/kaggle/working/zlab-robocup-five-second-validation`.
+Open [zlab-training.ipynb](zlab-training.ipynb), select T4 and run all
+cells. The notebook clones `main` and starts from the original 1199, selected
+in Kaggle version 20 with 59 clean stops, zero falls and three ball touches
+across 96 fresh trials. The pilot runs 300 PPO updates at 512 environments
+per GPU and saves every 100 updates.
 
-## Five-second training pilot
+About 65% of resets are full approaches, 25% start close to the ball
+and off-center with forward motion, and 10% start in the stop zone at
+rest. Training gives dense credit for each valid hold step as well as
+the terminal reward for completing the five-second hold.
 
-The training pilot starts from checkpoint 999 and runs one block of 300 PPO
-updates at 512 environments per GPU, saving every 100 updates. The episode limit is 18 seconds to allow time to
-approach, brake, and complete the five-second hold.
-
-The pilot compares each save with 999 on two 48-trial seeds. Checkpoint 1199
-is scored as a reference. Every evaluation uses the same five-second hold,
-full-length approaches, lateral correction, and randomized traction, with
-torso pushes and sensor noise off. A candidate must improve stops and timeouts
-on both seeds and stay within the baseline's fall and ball-touch counts on
-each seed. Read `progress.json` and the linked `comparison.json` under
-`/kaggle/working/zlab-robocup-five-second-stop-pilot`.
+Every evaluation uses full approaches at 2.8 m/s with a continuous
+five-second hold, lateral correction and randomized traction. Torso pushes
+and sensor noise are off. The pilot re-evaluates the parent and each save on
+seeds 61007 and 69539, with 999 as a reference. The promotion rules require
+more clean stops and fewer timeouts on both seeds with no increase in falls
+or ball touches. Read `progress.json` and `comparison.json` under
+`/kaggle/working/zlab-robocup-stop-refinement-pilot`.
 
 ### Rewards for the running approach and stop
 

@@ -284,7 +284,8 @@ def reset_straight_ball(env, env_ids):
     state[:, 1] = 0.0
     if command.cfg.finishing_start_fraction > 0.0:
         short = torch.rand(len(env_ids), device=env.device) < command.cfg.finishing_start_fraction
-        short_ids = env_ids[short]
+        short_rows = short.nonzero(as_tuple=True)[0]
+        short_ids = env_ids[short_rows]
         if short_ids.numel():
             velocities = torch.zeros((short_ids.numel(), 6), device=env.device)
             if command.cfg.lateral_correction:
@@ -293,6 +294,13 @@ def reset_straight_ball(env, env_ids):
                 left = torch.rand_like(offset) < 0.5
                 state[short, 1] = torch.where(left, offset, -offset)
                 velocities[:, 0].uniform_(0.35, 0.90)
+                # Use two sevenths of the finishing starts for stationary holds.
+                # At the pilot's 35% finishing rate this is 10% of all episodes.
+                stationary = torch.rand_like(offset) < 2 / 7
+                stationary_rows = short_rows[stationary]
+                distances[stationary_rows] = torch.empty_like(distances[stationary_rows]).uniform_(0.68, 0.85)
+                state[stationary_rows, 1] = 0.0
+                velocities[stationary, 0] = 0.0
             else:
                 distances[short] = torch.empty_like(distances[short]).uniform_(2.0, 4.5)
                 velocities[:, 0].uniform_(0.8, 1.6)
@@ -414,6 +422,11 @@ def backward_drift_near_ball(env):
     return near_ball * reverse_speed.square()
 
 
+def valid_stop_hold(env):
+    command = env.command_manager.get_term("twist")
+    return (command.stop_steps > 0).float()
+
+
 def arrival_bonus(env):
     terminations = env.termination_manager
     return (terminations.get_term("ball_reached") & ~terminations.get_term("fell_over")).float()
@@ -513,6 +526,7 @@ def ball_approach_env_cfg(play=False):
         brake_tracking=RewardTermCfg(func=brake_tracking_error, weight=-1.0),
         sprint_overspeed=RewardTermCfg(func=sprint_overspeed, weight=-2.0),
         backward_drift_near_ball=RewardTermCfg(func=backward_drift_near_ball, weight=-3.0),
+        valid_stop_hold=RewardTermCfg(func=valid_stop_hold, weight=2.0),
         lane_tracking=RewardTermCfg(func=lane_tracking_error, weight=-2.0),
         ball_touch=RewardTermCfg(func=ball_touch_penalty, weight=-25.0 * terminal_scale),
         failed_attempt=RewardTermCfg(func=failed_attempt, weight=-10.0 * terminal_scale),

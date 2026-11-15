@@ -118,7 +118,8 @@ def validate_candidate(checkpoint, control, work_dir, alternative=None):
     print(f"[BALL STABILITY] Selected {selected.name} after fresh-seed validation.", flush=True)
 
 
-def train_pilot(checkpoint, work_dir, blocks, updates, num_envs, control=None, *, lateral_pilot=False):
+def train_pilot(checkpoint, work_dir, blocks, updates, num_envs, control=None, *,
+                lateral_pilot=False, seeds=PILOT_SEEDS, train_seed=42):
     """Evaluate every save and stop after the first block without a better policy."""
     state_file = work_dir / "progress.json"
     finishing_pilot = control is not None
@@ -131,19 +132,24 @@ def train_pilot(checkpoint, work_dir, blocks, updates, num_envs, control=None, *
             raise ValueError("Use a separate work directory for the stability pilot.")
         if state["foot_friction"] != friction:
             raise ValueError("Use a fresh pilot work directory when changing foot friction.")
+        if state.get("seeds", list(PILOT_SEEDS)) != list(seeds):
+            raise ValueError("Use a fresh pilot work directory when changing evaluation seeds.")
+        if state.get("train_seed", 42) != train_seed:
+            raise ValueError("Use a fresh pilot work directory when changing the training seed.")
     else:
         baseline = work_dir / "baseline.pt"
         shutil.copyfile(checkpoint, baseline)
         state = {"mode": mode,
                  "checkpoint": str(baseline), "reports": None,
-                 "block": 0, "stop_reason": None, "foot_friction": friction}
+                 "block": 0, "stop_reason": None, "foot_friction": friction,
+                 "seeds": list(seeds), "train_seed": train_seed}
         save_state(state_file, state)
 
     def evaluate_both(path, directory, name):
         return [
             evaluate(path, directory, f"{name}-seed-{seed}", PROFILES[0],
                      seed=seed, lateral_correction=lateral_pilot)
-            for seed in PILOT_SEEDS
+            for seed in seeds
         ]
 
     if state["stop_reason"] == "no_improvement":
@@ -161,7 +167,7 @@ def train_pilot(checkpoint, work_dir, blocks, updates, num_envs, control=None, *
             save_state(state_file, state)
         runtime_env = dict(
             os.environ, ZLAB_PYTHON=sys.executable, ZLAB_LOG_ROOT=str(directory),
-            ZLAB_TRAIN_SEED=str(41 + block), ZLAB_TORSO_PUSH_SCALE="0",
+            ZLAB_TRAIN_SEED=str(train_seed + block - 1), ZLAB_TORSO_PUSH_SCALE="0",
             ZLAB_OBSERVATION_NOISE_SCALE="0", ZLAB_SAVE_INTERVAL="100",
             ZLAB_LATERAL_CORRECTION=str(lateral_pilot),
             ZLAB_FINISHING_START_FRACTION="0.35" if finishing_pilot else "0",
@@ -202,7 +208,7 @@ def train_pilot(checkpoint, work_dir, blocks, updates, num_envs, control=None, *
                   flush=True)
 
         save_state(directory / "comparison.json", {
-            "seeds": PILOT_SEEDS, "baseline": str(incumbent),
+            "seeds": seeds, "baseline": str(incumbent),
             "baseline_reports": state["reports"], "candidates": comparisons,
             **({"control_checkpoint": str(control), "control_reports": state["control_reports"]}
                if finishing_pilot else {}),
@@ -319,6 +325,9 @@ def main():
     parser.add_argument("--updates", type=int, default=300)
     parser.add_argument("--num-envs", type=int, default=512)
     parser.add_argument("--pilot-blocks", type=int, metavar="N")
+    parser.add_argument("--pilot-seeds", nargs=2, type=int, default=PILOT_SEEDS,
+                        metavar=("FIRST", "SECOND"))
+    parser.add_argument("--pilot-train-seed", type=int, default=42)
     parser.add_argument("--lateral-pilot", action="store_true")
     parser.add_argument("--finishing-control", type=Path, metavar="CHECKPOINT",
                         help="Run the finishing curriculum and evaluate this reference checkpoint.")
@@ -331,6 +340,8 @@ def main():
         parser.error("Use a finite, positive time budget and positive update and environment counts.")
     if args.pilot_blocks is not None and args.pilot_blocks <= 0:
         parser.error("--pilot-blocks must be positive.")
+    if min(*args.pilot_seeds, args.pilot_train_seed) < 0 or len(set(args.pilot_seeds)) != 2:
+        parser.error("Use distinct nonnegative pilot evaluation seeds and a nonnegative training seed.")
     if args.finishing_control is not None and args.pilot_blocks is None:
         parser.error("--finishing-control requires --pilot-blocks.")
     if args.lateral_pilot and args.finishing_control is None:
@@ -360,7 +371,8 @@ def main():
             if control is not None:
                 control = control.expanduser().resolve(strict=True)
             train_pilot(checkpoint, work_dir, args.pilot_blocks, args.updates, args.num_envs,
-                        control, lateral_pilot=args.lateral_pilot)
+                        control, lateral_pilot=args.lateral_pilot, seeds=args.pilot_seeds,
+                        train_seed=args.pilot_train_seed)
 
 
 if __name__ == "__main__":
