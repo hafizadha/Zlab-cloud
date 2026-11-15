@@ -18,6 +18,7 @@ from mjlab.tasks.registry import load_env_cfg, load_rl_cfg, load_runner_cls
 from mjlab.rl import MjlabOnPolicyRunner, RslRlBaseRunnerCfg, RslRlVecEnvWrapper
 from mjlab.envs import ManagerBasedRlEnv, ManagerBasedRlEnvCfg
 from mjlab.managers import RewardTermCfg
+from mjlab.managers.scene_entity_config import SceneEntityCfg
 from scripts.checkpoint_upload import HuggingFaceCheckpoints
 import mjlab
 import torch
@@ -25,7 +26,8 @@ import tyro
 from src.tasks.velocity.config.z01_std_add_head import TASK_ID
 from src.tasks.velocity.config.z01_std_add_head.ball_sprint import (
     CHECKPOINT_TASK, DEFAULT_FOOT_FRICTION, STABILITY_SPEED, STABILITY_STAGE,
-    set_foot_friction, set_observation_noise, set_push_strength, stop_lateral_instability,
+    foot_ball_proximity, set_foot_friction, set_observation_noise, set_push_strength,
+    stop_lateral_instability,
 )
 from typing import Literal
 from pathlib import Path
@@ -91,6 +93,11 @@ def run_train(task_id: str, cfg: TrainConfig, log_dir: Path) -> None:
         )
         # Scale the existing dt-normalized terminal cost from 25 to 40 units.
         cfg.env.rewards["ball_touch"].weight *= 40.0 / 25.0
+        foot_geom_names = cfg.env.events["foot_friction"].params["asset_cfg"].geom_names
+        cfg.env.rewards["foot_ball_proximity"] = RewardTermCfg(
+            func=foot_ball_proximity, weight=-2.0,
+            params={"asset_cfg": SceneEntityCfg("robot", geom_names=foot_geom_names)},
+        )
     set_push_strength(cfg.env, cfg.torso_push_scale)
     set_observation_noise(cfg.env, cfg.observation_noise_scale)
     set_foot_friction(cfg.env, (cfg.foot_friction_min, cfg.foot_friction_max))

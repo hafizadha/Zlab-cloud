@@ -335,6 +335,13 @@ def ball_touch_penalty(env):
     return env.termination_manager.get_term("ball_touched")
 
 
+def foot_ball_proximity(env, asset_cfg: SceneEntityCfg):
+    feet = env.scene[asset_cfg.name].data.geom_pos_w[:, asset_cfg.geom_ids]
+    ball = env.scene["ball"].data.root_link_pos_w
+    closest = (feet - ball[:, None]).norm(dim=-1).amin(dim=1)
+    return ((0.20 - closest) / 0.08).clamp(0.0, 2.0).square()
+
+
 def lateral_velocity_error(robot, command, lateral):
     sideways_speed = robot.root_link_lin_vel_w[:, 1]
     if not command.cfg.lateral_correction:
