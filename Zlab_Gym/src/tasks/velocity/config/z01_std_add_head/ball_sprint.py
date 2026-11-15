@@ -304,6 +304,7 @@ def reset_straight_ball(env, env_ids):
                 state[stationary_rows, 1] = 0.0
                 if command.cfg.early_braking:
                     velocities[stationary, 0] = torch.empty_like(offset[stationary]).uniform_(-0.18, 0.18)
+                    velocities[stationary, 1] = torch.empty_like(offset[stationary]).uniform_(-0.10, 0.10)
                 else:
                     velocities[stationary, 0] = 0.0
             else:

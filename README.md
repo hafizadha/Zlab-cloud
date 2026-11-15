@@ -16,8 +16,8 @@ The robot uses its existing position servos to hold the targets.
 ## Kaggle T4 training
 
 Open [zlab-training.ipynb](zlab-training.ipynb), select T4 and run all
-cells. The notebook clones `main`, starts from the validated original 1199,
-and scores 1499 from Kaggle version 21 as a reference. It runs 300 PPO updates
+cells. The notebook clones `main`, starts from the selected version 26 checkpoint 1499
+and scores the original 1199 as a reference. It runs 300 PPO updates
 at 512 environments per GPU and saves every 100 updates.
 
 This pilot uses the earlier braking profile tested on 1499. It starts
@@ -25,13 +25,14 @@ deceleration sooner and targets a 0.75 m gap. When the robot is close and
 centered, the training reward penalizes lateral speed and torso tilt to
 help it finish braking and stand. A proximity penalty starts when the center of a foot collision geometry comes within
 0.28 m of the ball center. About 65% of resets are full approaches,
-25% are rolling off-center approaches, and 10% start close to the ball with forward velocity sampled from -0.18 to 0.18 m/s.
+25% are rolling off-center approaches, and 10% start close to the ball with forward velocity sampled from -0.18 to
+0.18 m/s and lateral velocity from -0.10 to 0.10 m/s.
 
 The evaluation uses full approaches at 2.8 m/s with the earlier braking
 profile and a continuous five-second hold. It compares each save against
-1199 on seeds 208003 and 219017 and records 1499 as a reference. Read
+version 26 checkpoint 1499 on seeds 241013 and 252019 and records 1199 as a reference. Read
 `progress.json` and `comparison.json` under
-`/kaggle/working/zlab-robocup-hold-recovery-pilot`. To preview the pilot's
+`/kaggle/working/zlab-robocup-lateral-hold-pilot`. To preview the pilot's
 controller in `scripts/play.py`, pass `--early-braking True`.
 
 ### Rewards for the running approach and stop
