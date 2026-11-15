@@ -36,7 +36,7 @@ BALL_CONTACT_SENSOR = "robot_ball_contact"
 HELD_JOINTS = r"(?:head_.*|(?:left|right)_wrist_.*)"
 MOVING_JOINTS = rf"(?!{HELD_JOINTS}$).*"
 STOP_HEADING_RAD = math.radians(12)
-STOP_HOLD_SECONDS = 1.5
+STOP_HOLD_SECONDS = 5.0
 
 
 def apply_walking_profile(cfg):
@@ -400,6 +400,20 @@ def brake_tracking_error(env):
     return (remaining < 3.0) * excess_speed.square()
 
 
+def sprint_overspeed(env):
+    forward = env.scene["robot"].data.root_link_lin_vel_w[:, 0]
+    return (forward - STABILITY_SPEED - 0.10).clamp(0.0, 2.0).square()
+
+
+def backward_drift_near_ball(env):
+    command = env.command_manager.get_term("twist")
+    robot = env.scene["robot"].data
+    gap = command.ball_spawn_xy[:, 0] - robot.root_link_pos_w[:, 0]
+    near_ball = ((2.2 - gap) / 1.2).clamp(0.0, 1.0)
+    reverse_speed = (-robot.root_link_lin_vel_w[:, 0] - 0.10).clamp(0.0, 2.0)
+    return near_ball * reverse_speed.square()
+
+
 def arrival_bonus(env):
     terminations = env.termination_manager
     return (terminations.get_term("ball_reached") & ~terminations.get_term("fell_over")).float()
@@ -461,7 +475,7 @@ def ball_approach_env_cfg(play=False):
                 "body_point_offset": (0.0, 0.0, 0.10),
             },
         )
-    cfg.episode_length_s = 12.0
+    cfg.episode_length_s = 18.0
     cfg.is_finite_horizon = True
     cfg.viewer.distance = 5.0
     cfg.commands["twist"] = StraightBallSprintCommandCfg(
@@ -497,6 +511,8 @@ def ball_approach_env_cfg(play=False):
         settle_at_ball=RewardTermCfg(func=settle_reward, weight=0.8),
         finish_alignment=RewardTermCfg(func=finishing_reward, weight=1.5),
         brake_tracking=RewardTermCfg(func=brake_tracking_error, weight=-1.0),
+        sprint_overspeed=RewardTermCfg(func=sprint_overspeed, weight=-2.0),
+        backward_drift_near_ball=RewardTermCfg(func=backward_drift_near_ball, weight=-3.0),
         lane_tracking=RewardTermCfg(func=lane_tracking_error, weight=-2.0),
         ball_touch=RewardTermCfg(func=ball_touch_penalty, weight=-25.0 * terminal_scale),
         failed_attempt=RewardTermCfg(func=failed_attempt, weight=-10.0 * terminal_scale),

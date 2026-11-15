@@ -2,7 +2,7 @@
 
 Train the Z01 ball approach at a fixed 2.8 m/s command cap. Full-length
 trials place the ball 5–11 m ahead. A clean stop requires the robot to settle within 1 m
-of the ball for 1.5 continuous seconds, below 0.25 m/s, within 0.25 m laterally, and with yaw
+of the ball for 5 continuous seconds, below 0.25 m/s, within 0.25 m laterally, and with yaw
 within 12° of the lane. Robot–ball contact ends the approach and costs 25
 reward units. Other failed attempts cost 10. Lane offset, sideways velocity,
 and yaw error are penalized throughout the approach. Foot spacing uses signed
@@ -13,20 +13,21 @@ targets. The actor still has 29 action channels so checkpoint 1400 can load.
 The exported ONNX metadata carries a zero action scale for each held joint.
 The robot uses its existing position servos to hold the targets.
 
-## Kaggle T4 validation
+## Kaggle T4 training
 
 Open [zlab-training.ipynb](zlab-training.ipynb) in Kaggle, select a T4 GPU,
-enable Internet, and run all cells. The notebook clones `main` and evaluates
-checkpoints 1199 and 999 on fresh seeds 27491 and 36187, with 48 full-length
-2.8 m/s approaches per checkpoint per seed. Both checkpoints use lateral
-correction and the same traction range, with torso pushes and sensor noise off.
+enable Internet, and run all cells. The notebook clones `main`, starts from
+checkpoint 999, and runs one block of 300 PPO updates at 512 environments per
+GPU, saving every 100 updates. The episode limit is 18 seconds to allow time to
+approach, brake, and complete the five-second hold.
 
-Checkpoint 1199 must gain clean stops overall, match or beat 999's clean stops,
-fall count and 95th-percentile lane offset on each seed, and incur no more ball
-touches across both seeds. The notebook saves the paired results and gate outcomes
-to `/kaggle/working/zlab-robocup-1199-validation/validation.json` and the selected
-weights to `selected.pt` in the same directory. This run evaluates the existing
-checkpoints without PPO updates.
+The pilot compares each save with 999 on two 48-trial seeds. Checkpoint 1199
+is scored as a reference. Every evaluation uses the same five-second hold,
+full-length approaches, lateral correction, and randomized traction, with
+torso pushes and sensor noise off. A candidate must improve stops and timeouts
+on both seeds and stay within the baseline's fall and ball-touch counts on
+each seed. Read `progress.json` and the linked `comparison.json` under
+`/kaggle/working/zlab-robocup-five-second-stop-pilot`.
 
 ### Rewards for the running approach and stop
 
@@ -37,8 +38,9 @@ checkpoints without PPO updates.
   sideways part of the reward favors tracking the correction command. The
   target blends toward zero sideways speed between 25 and 15 cm of lane
   error. Sideways tracking gets more weight near the ball while off-center.
-  Brake tracking penalizes excess forward speed near the ball.
-- A clean 1.5 s hold earns 24 terminal reward units. Ball contact costs 25 and
+  Brake tracking penalizes excess forward speed near the ball. The pilot also
+  penalizes forward speed above 2.9 m/s and backward drift during the final approach.
+- A clean 5 s hold earns 24 terminal reward units. Ball contact costs 25 and
   other failed trials cost 10. The evaluation does not reward jumping or
   claim that successful stops establish a human running gait. Check stride
   alternation and foot clearance in replay before adding stronger disturbances.
