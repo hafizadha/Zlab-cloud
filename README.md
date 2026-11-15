@@ -13,12 +13,20 @@ targets. The actor still has 29 action channels so checkpoint 1400 can load.
 The exported ONNX metadata carries a zero action scale for each held joint.
 The robot uses its existing position servos to hold the targets.
 
-## Kaggle T4 training
+## Kaggle T4 notebook
 
-Open [zlab-training.ipynb](zlab-training.ipynb) in Kaggle, select a T4 GPU,
-enable Internet, and run all cells. The notebook clones `main`, starts from
-checkpoint 999, and runs one block of 300 PPO updates at 512 environments per
-GPU, saving every 100 updates. The episode limit is 18 seconds to allow time to
+The default notebook compares 999 and both 1199 checkpoints at 2.8 m/s
+with a five-second hold. It uses 48 trials per checkpoint on each of two
+fresh seeds. A separate diagnostic comparison on seed 2401 measures
+whether failed trials ever entered the stop zone, how long they held,
+and how often they drifted backward after entering. Promotion uses the
+fresh seeds only. The notebook writes `validation.json` and `selected.pt`
+under `/kaggle/working/zlab-robocup-five-second-validation`.
+
+## Five-second training pilot
+
+The training pilot starts from checkpoint 999 and runs one block of 300 PPO
+updates at 512 environments per GPU, saving every 100 updates. The episode limit is 18 seconds to allow time to
 approach, brake, and complete the five-second hold.
 
 The pilot compares each save with 999 on two 48-trial seeds. Checkpoint 1199

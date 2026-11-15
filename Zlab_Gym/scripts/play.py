@@ -134,10 +134,14 @@ def evaluate_ball_sprint(env: RslRlVecEnvWrapper, policy: Callable, episodes: in
     lane_offset = torch.zeros_like(peak_speed)
     heading_error = torch.zeros_like(peak_speed)
     crossed_feet = torch.zeros_like(remaining, dtype=torch.bool)
+    longest_hold = torch.zeros_like(remaining)
+    backward_after_entry = torch.zeros_like(crossed_feet)
     results = []
     while remaining.any():
         distance = command.ball_spawn_xy[:, 0] - simulation.scene.env_origins[:, 0] - PITCH_START_X
         episode_time = (simulation.episode_length_buf + 1) * simulation.step_dt
+        longest_hold = torch.maximum(longest_hold, command.stop_steps)
+        backward_after_entry |= (longest_hold > 0) & (robot.root_link_lin_vel_w[:, 0] < -0.25)
         peak_speed = torch.maximum(peak_speed, robot.root_link_lin_vel_w[:, 0])
         lateral_position = robot.root_link_pos_w[:, 1] - simulation.scene.env_origins[:, 1]
         lane_offset = torch.maximum(lane_offset, lateral_position.abs())
@@ -156,6 +160,7 @@ def evaluate_ball_sprint(env: RslRlVecEnvWrapper, policy: Callable, episodes: in
         results.append(torch.stack((
             distance, stopped, fell, touched, missed, timed_out, peak_speed,
             lane_offset, heading_error.rad2deg(), episode_time, crossed_feet,
+            longest_hold * simulation.step_dt, backward_after_entry,
             *(command.stop_errors & timed_out[:, None]).unbind(dim=1),
         ), dim=1)[finished])
         remaining -= finished.long()
@@ -163,11 +168,16 @@ def evaluate_ball_sprint(env: RslRlVecEnvWrapper, policy: Callable, episodes: in
         lane_offset.masked_fill_(finished, 0.0)
         heading_error.masked_fill_(finished, 0.0)
         crossed_feet.masked_fill_(finished, False)
+        longest_hold.masked_fill_(finished, 0)
+        backward_after_entry.masked_fill_(finished, False)
 
     (distance, stops, falls, touches, misses, timeouts, peak, lateral, heading, duration, crossed,
+     hold_seconds, reversed_after_entry,
      timeout_gap, timeout_lateral, timeout_yaw, timeout_speed) = (
         torch.cat(results).T.cpu()
     )
+    failed = ~stops.bool()
+    entered = hold_seconds > 0
     metrics = {
         "episodes": episodes,
         "stops": int(stops.sum()),
@@ -176,6 +186,13 @@ def evaluate_ball_sprint(env: RslRlVecEnvWrapper, policy: Callable, episodes: in
         "misses": int(misses.sum()),
         "timeouts": int(timeouts.sum()),
         "trials_with_crossed_feet": int(crossed.sum()),
+        "failed_before_stop_entry": int((failed & ~entered).sum()),
+        "failed_after_stop_entry": int((failed & entered).sum()),
+        "falls_after_stop_entry": int((falls.bool() & entered).sum()),
+        "failures_with_backward_drift_after_entry": int((failed & reversed_after_entry.bool()).sum()),
+        "median_longest_hold_on_failed_entries_s": (
+            hold_seconds[failed & entered].median().item() if (failed & entered).any() else None
+        ),
         "timeout_outside_forward_gap": int(timeout_gap.sum()),
         "timeout_outside_lateral_band": int(timeout_lateral.sum()),
         "timeout_yaw_above_limit": int(timeout_yaw.sum()),

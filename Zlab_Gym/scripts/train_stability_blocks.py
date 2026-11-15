@@ -62,23 +62,9 @@ def save_state(state_file, state):
     pending.replace(state_file)
 
 
-def validate_candidate(checkpoint, control, work_dir):
-    report = {
-        "seeds": VALIDATION_SEEDS,
-        "episodes_per_seed": EPISODES,
-        "foot_friction": [float(os.environ.get("ZLAB_FOOT_FRICTION_MIN", "0.35")),
-                          float(os.environ.get("ZLAB_FOOT_FRICTION_MAX", "1.15"))],
-    }
-    for name, path in (("control", control), ("candidate", checkpoint)):
-        report[name] = {"checkpoint": str(path), "reports": [
-            evaluate(path, work_dir, f"{name}-seed-{seed}", PROFILES[0],
-                     seed=seed, lateral_correction=True)
-            for seed in VALIDATION_SEEDS
-        ]}
-    candidate = report["candidate"]["reports"]
-    baseline = report["control"]["reports"]
+def validation_criteria(candidate, baseline):
     paired = list(zip(candidate, baseline, strict=True))
-    criteria = {
+    return {
         "more_clean_stops_overall": sum(r["stops"] for r in candidate) > sum(r["stops"] for r in baseline),
         "clean_stops_no_regression_by_seed": all(new["stops"] >= old["stops"] for new, old in paired),
         "falls_no_regression_by_seed": all(new["falls"] <= old["falls"] for new, old in paired),
@@ -87,8 +73,45 @@ def validate_candidate(checkpoint, control, work_dir):
             new["lane_offset_p95_m"] <= old["lane_offset_p95_m"] for new, old in paired
         ),
     }
-    report["promotion_criteria"] = criteria
-    selected = checkpoint if all(criteria.values()) else control
+
+
+def validate_candidate(checkpoint, control, work_dir, alternative=None):
+    seeds = VALIDATION_SEEDS if alternative is None else (46219, 53831)
+    report = {
+        "seeds": seeds,
+        "episodes_per_seed": EPISODES,
+        "foot_friction": [float(os.environ.get("ZLAB_FOOT_FRICTION_MIN", "0.35")),
+                          float(os.environ.get("ZLAB_FOOT_FRICTION_MAX", "1.15"))],
+    }
+    checkpoints = {"control": control, "candidate": checkpoint}
+    if alternative is not None:
+        checkpoints["alternative"] = alternative
+    for name, path in checkpoints.items():
+        report[name] = {"checkpoint": str(path), "reports": [
+            evaluate(path, work_dir, f"{name}-seed-{seed}", PROFILES[0],
+                     seed=seed, lateral_correction=True)
+            for seed in seeds
+        ]}
+
+    qualified = []
+    for name in checkpoints.keys() - {"control"}:
+        reports = report[name]["reports"]
+        criteria = validation_criteria(reports, report["control"]["reports"])
+        report[name]["promotion_criteria"] = criteria
+        if all(criteria.values()):
+            rank = (sum(r["stops"] for r in reports), -sum(r["falls"] for r in reports),
+                    -sum(r["touches"] for r in reports), -sum(r["lane_offset_p95_m"] for r in reports))
+            qualified.append((rank, name))
+    report["promotion_criteria"] = report["candidate"]["promotion_criteria"]
+    if alternative is not None:
+        report["diagnostic_seed"] = EVALUATION_SEED
+        for name in ("control", "candidate"):
+            report[name]["diagnostic_report"] = evaluate(
+                checkpoints[name], work_dir, f"{name}-diagnostic-{EVALUATION_SEED}",
+                PROFILES[0], seed=EVALUATION_SEED, lateral_correction=True,
+            )
+    selected_name = max(qualified)[1] if qualified else "control"
+    selected = checkpoints[selected_name]
     report["selected_checkpoint"] = str(selected)
     shutil.copyfile(selected, work_dir / "selected.pt")
     save_state(work_dir / "validation.json", report)
@@ -301,6 +324,8 @@ def main():
                         help="Run the finishing curriculum and evaluate this reference checkpoint.")
     parser.add_argument("--validate-against", type=Path, metavar="CHECKPOINT",
                         help="Compare the candidate against this control on fresh seeds without PPO.")
+    parser.add_argument("--validation-alternative", type=Path, metavar="CHECKPOINT",
+                        help="Evaluate an additional candidate with the five-second hold protocol.")
     args = parser.parse_args()
     if not 0 < args.hours < float("inf") or min(args.updates, args.num_envs) <= 0:
         parser.error("Use a finite, positive time budget and positive update and environment counts.")
@@ -312,6 +337,8 @@ def main():
         parser.error("--lateral-pilot requires --finishing-control.")
     if args.validate_against is not None and args.pilot_blocks is not None:
         parser.error("--validate-against cannot be used with --pilot-blocks.")
+    if args.validation_alternative is not None and args.validate_against is None:
+        parser.error("--validation-alternative requires --validate-against.")
     work_dir = args.work_dir.expanduser().resolve()
     work_dir.mkdir(parents=True, exist_ok=True)
     with (work_dir / "training.lock").open("a") as lock:
@@ -322,7 +349,10 @@ def main():
         checkpoint = args.checkpoint.expanduser().resolve(strict=True)
         if args.validate_against is not None:
             control = args.validate_against.expanduser().resolve(strict=True)
-            validate_candidate(checkpoint, control, work_dir)
+            alternative = args.validation_alternative
+            if alternative is not None:
+                alternative = alternative.expanduser().resolve(strict=True)
+            validate_candidate(checkpoint, control, work_dir, alternative)
         elif args.pilot_blocks is None:
             train_blocks(checkpoint, work_dir, args.hours, args.updates, args.num_envs)
         else:
