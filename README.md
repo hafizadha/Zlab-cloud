@@ -1,8 +1,8 @@
 # Zlab Cloud · Ball approach stability
 
-Fine-tune checkpoint 1400 at a fixed 2.8 m/s command cap. Each trial places
-the ball 5–11 m ahead. A clean stop requires the robot to settle within 1 m
-of the ball for 0.4 s, below 0.25 m/s, within 0.25 m laterally, and with yaw
+Train the Z01 ball approach at a fixed 2.8 m/s command cap. Full-length
+trials place the ball 5–11 m ahead. A clean stop requires the robot to settle within 1 m
+of the ball for 1.5 continuous seconds, below 0.25 m/s, within 0.25 m laterally, and with yaw
 within 12° of the lane. Robot–ball contact ends the approach and costs 25
 reward units. Other failed attempts cost 10. Lane offset, sideways velocity,
 and yaw error are penalized throughout the approach. Foot spacing uses signed
@@ -16,22 +16,37 @@ The robot uses its existing position servos to hold the targets.
 ## Kaggle T4 training
 
 Open [zlab-training.ipynb](zlab-training.ipynb) in Kaggle, select a T4 GPU,
-and run all cells. The notebook clones `main` and uses the bundled block 50
-checkpoint, `Zlab_Gym/checkpoints/model_199_b50.pt`. The original 1400
-checkpoint is also available.
+and run all cells. The notebook clones `main` and starts from the bundled
+100-update checkpoint, `Zlab_Gym/checkpoints/model_299.pt`. It also scores
+block 50 as the control. The original 1400 checkpoint is available.
 
 The default pilot runs one block of 300 updates at 512 environments per GPU.
-Each checkpoint at 100, 200, and 300 updates is compared with the starting
-policy on two sets of 48 trials, with pushes and sensor noise disabled. To
-replace the baseline, a candidate must improve clean stops and reduce
-95th-percentile lane drift by at least 0.05 m on both seeds, with falls and
-touches at or below baseline on each seed. The pilot stops after the first
-block with no qualifying checkpoint. Increase `PILOT_BLOCKS` to allow further
-blocks if training improves.
+During training, 35% of resets put the ball 2–4.5 m away and give the robot
+0.8–1.6 m/s of initial forward velocity. The other resets keep the 5–11 m
+approach. Every evaluation uses full-length approaches with pushes and noise
+disabled. A candidate must earn more clean stops and fewer timeouts on each
+of two 48-trial seeds. Falls and touches must stay at or below the starting
+checkpoint’s counts on each seed, and lane drift may increase by at most 5 cm.
+The pilot stops after the first block with no qualifying checkpoint.
 
-Read `progress.json` in `/kaggle/working/zlab-robocup-foot-spacing-pilot` for the
-selected checkpoint and the path to `comparison.json`. Use a new work
-directory for a fresh comparison or different traction settings.
+Read `progress.json` in `/kaggle/working/zlab-robocup-finishing-pilot` for
+the selected checkpoint and the path to `comparison.json`. The report
+includes the block 50 control, crossed-foot incidence, and overlapping
+timeout counts for gap, lateral offset, yaw, and speed. Start a new work
+directory when changing traction.
+
+### Rewards for the running approach and stop
+
+- Forward command tracking and progress reward encourage acceleration and
+  running within the 2.8 m/s cap. Upright posture, smooth actions, low slip,
+  and signed foot spacing discourage unstable and crossed steps.
+- Lane and heading costs apply across the approach. Brake tracking penalizes
+  excess forward speed near the ball. Finishing alignment gives credit for
+  slowing near the target while centered and facing forwards.
+- A clean 1.5 s hold earns 24 terminal reward units. Ball contact costs 25 and
+  other failed trials cost 10. The evaluation does not reward jumping or
+  claim that successful stops establish a human running gait. Check stride
+  alternation and foot clearance in replay before adding stronger disturbances.
 
 For optional Hugging Face backups, supply a write-capable `HF_TOKEN` in
 Kaggle Secrets and enable uploads in the notebook. Periodic training
@@ -44,8 +59,9 @@ The selection file identifies which checkpoint to use.
    randomized start position and heading, surface friction, mass, encoder bias,
    motor gains, and actuator delay. Review lane offset and heading alongside
    successful stops.
-2. For the optional robustness curriculum, keep 2.8 m/s throughout. Increase torso pushes and
-   sensor noise together through quarter, half, and full configured strength.
+2. Once the clean profile passes on a fresh seed, use the optional robustness
+   curriculum at 2.8 m/s. Increase torso pushes and sensor noise together
+   through quarter, half, and full configured strength.
    Every block evaluates its final checkpoint on the same 48 trials as the
    incumbent. Favor passing the gate, then more clean stops, fewer touches and falls,
    and lower lane and heading error. Each profile must pass on a second seed

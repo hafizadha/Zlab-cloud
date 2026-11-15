@@ -36,6 +36,7 @@ BALL_CONTACT_SENSOR = "robot_ball_contact"
 HELD_JOINTS = r"(?:head_.*|(?:left|right)_wrist_.*)"
 MOVING_JOINTS = rf"(?!{HELD_JOINTS}$).*"
 STOP_HEADING_RAD = math.radians(12)
+STOP_HOLD_SECONDS = 1.5
 
 
 def apply_walking_profile(cfg):
@@ -179,6 +180,7 @@ def _ball_spec() -> mujoco.MjSpec:
 class StraightBallSprintCommandCfg(CommandTermCfg):
     speed_cap: float = STABILITY_SPEED
     ball_distance_range: tuple[float, float] = (5.0, 11.0)
+    finishing_start_fraction: float = 0.0
 
     def build(self, env):
         return StraightBallSprintCommand(self, env)
@@ -191,7 +193,8 @@ class StraightBallSprintCommand(CommandTerm):
         self._speed = torch.full((self.num_envs,), cfg.speed_cap, device=self.device)
         self.ball_spawn_xy = torch.zeros((self.num_envs, 2), device=self.device)
         self.stop_steps = torch.zeros(self.num_envs, dtype=torch.long, device=self.device)
-        self.stop_steps_required = math.ceil(0.4 / env.step_dt)
+        self.stop_errors = torch.zeros((self.num_envs, 4), device=self.device, dtype=torch.bool)
+        self.stop_steps_required = math.ceil(STOP_HOLD_SECONDS / env.step_dt)
         self.metrics["peak_forward_mps"] = torch.zeros_like(self._speed)
         self.metrics["target_speed_mps"] = torch.zeros_like(self._speed)
 
@@ -221,6 +224,13 @@ class StraightBallSprintCommand(CommandTerm):
 
     def record_step(self):
         robot = self._env.scene["robot"].data
+        ball_offset = self._env.scene["ball"].data.root_link_pos_w[:, :2] - robot.root_link_pos_w[:, :2]
+        self.stop_errors.copy_(torch.stack((
+            (ball_offset[:, 0] < 0.35) | (ball_offset[:, 0] > 1.0),
+            ball_offset[:, 1].abs() > 0.25,
+            wrap_to_pi(robot.heading_w).abs() > STOP_HEADING_RAD,
+            robot.root_link_lin_vel_w[:, :2].norm(dim=1) >= 0.25,
+        ), dim=1))
         forward = robot.root_link_lin_vel_w[:, 0]
         self.stop_steps.copy_(torch.where(self.in_stop_zone(), self.stop_steps + 1, 0))
         self.metrics["peak_forward_mps"].copy_(
@@ -264,6 +274,14 @@ def reset_straight_ball(env, env_ids):
     ball = env.scene["ball"]
     state = ball.data.default_root_state[env_ids].clone()
     distances = torch.empty(len(env_ids), device=env.device).uniform_(*command.cfg.ball_distance_range)
+    if command.cfg.finishing_start_fraction > 0.0:
+        short = torch.rand(len(env_ids), device=env.device) < command.cfg.finishing_start_fraction
+        distances[short] = torch.empty_like(distances[short]).uniform_(2.0, 4.5)
+        short_ids = env_ids[short]
+        if short_ids.numel():
+            velocities = torch.zeros((short_ids.numel(), 6), device=env.device)
+            velocities[:, 0].uniform_(0.8, 1.6)
+            env.scene["robot"].write_root_link_velocity_to_sim(velocities, env_ids=short_ids)
     state[:, 0] = PITCH_START_X + distances
     state[:, 1] = 0.0
     state[:, :3] += env.scene.env_origins[env_ids]
@@ -321,6 +339,20 @@ def settle_reward(env):
     position_error = (offset[:, 0] - 0.65).square() + offset[:, 1].square()
     speed_error = robot.root_link_lin_vel_w[:, :2].square().sum(dim=1)
     return torch.exp(-position_error / 0.45**2 - speed_error / 0.5**2)
+
+
+def finishing_reward(env):
+    robot = env.scene["robot"].data
+    target = env.command_manager.get_term("twist").ball_spawn_xy
+    offset = target - robot.root_link_pos_w[:, :2]
+    forward_speed = robot.root_link_lin_vel_w[:, 0]
+    side_speed = robot.root_link_lin_vel_w[:, 1]
+    heading = wrap_to_pi(robot.heading_w)
+    # Near the ball, reward reducing sideways motion before the full stop is met.
+    distance = ((offset[:, 0] - 0.65) / 0.9).square()
+    alignment = (offset[:, 1] / 0.40).square() + (heading / math.radians(20)).square()
+    motion = (forward_speed / 0.9).square() + (side_speed / 0.35).square()
+    return torch.exp(-distance - 0.5 * (alignment + motion))
 
 
 def brake_tracking_error(env):
@@ -427,6 +459,7 @@ def ball_approach_env_cfg(play=False):
         ball_progress=RewardTermCfg(func=sprint_progress, weight=1.5),
         ball_arrival=RewardTermCfg(func=arrival_bonus, weight=24.0 * terminal_scale),
         settle_at_ball=RewardTermCfg(func=settle_reward, weight=0.8),
+        finish_alignment=RewardTermCfg(func=finishing_reward, weight=1.5),
         brake_tracking=RewardTermCfg(func=brake_tracking_error, weight=-1.0),
         lane_tracking=RewardTermCfg(func=lane_tracking_error, weight=-2.0),
         ball_touch=RewardTermCfg(func=ball_touch_penalty, weight=-25.0 * terminal_scale),

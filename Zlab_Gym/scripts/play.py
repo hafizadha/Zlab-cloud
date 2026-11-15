@@ -88,7 +88,9 @@ def run_play(cfg: PlayConfig) -> None:
 @torch.inference_mode()
 def evaluate_ball_sprint(env: RslRlVecEnvWrapper, policy: Callable, episodes: int) -> dict[str, int | float | None]:
     simulation = env.unwrapped
-    robot = simulation.scene["robot"].data
+    robot_entity = simulation.scene["robot"]
+    robot = robot_entity.data
+    foot_sites, _ = robot_entity.find_sites(("left_foot", "right_foot"), preserve_order=True)
     terminations = simulation.termination_manager
     command = simulation.command_manager.get_term("twist")
     per_env, remainder = divmod(episodes, env.num_envs)
@@ -97,6 +99,7 @@ def evaluate_ball_sprint(env: RslRlVecEnvWrapper, policy: Callable, episodes: in
     peak_speed = torch.zeros(env.num_envs, device=env.device)
     lane_offset = torch.zeros_like(peak_speed)
     heading_error = torch.zeros_like(peak_speed)
+    crossed_feet = torch.zeros_like(remaining, dtype=torch.bool)
     results = []
     while remaining.any():
         distance = command.ball_spawn_xy[:, 0] - simulation.scene.env_origins[:, 0] - PITCH_START_X
@@ -105,6 +108,10 @@ def evaluate_ball_sprint(env: RslRlVecEnvWrapper, policy: Callable, episodes: in
         lateral_position = robot.root_link_pos_w[:, 1] - simulation.scene.env_origins[:, 1]
         lane_offset = torch.maximum(lane_offset, lateral_position.abs())
         heading_error = torch.maximum(heading_error, wrap_to_pi(robot.heading_w).abs())
+        left, right = robot.site_pos_w[:, foot_sites, :2].unbind(dim=1)
+        delta = left - right
+        yaw = robot.heading_w
+        crossed_feet |= delta[:, 1] * yaw.cos() - delta[:, 0] * yaw.sin() < 0.0
         _, _, done, _ = env.step(policy(env.get_observations()))
         finished = done.bool() & (remaining > 0)
         touched = terminations.get_term("ball_touched")
@@ -114,14 +121,17 @@ def evaluate_ball_sprint(env: RslRlVecEnvWrapper, policy: Callable, episodes: in
         timed_out = ~(stopped | fell | touched | missed)
         results.append(torch.stack((
             distance, stopped, fell, touched, missed, timed_out, peak_speed,
-            lane_offset, heading_error.rad2deg(), episode_time,
+            lane_offset, heading_error.rad2deg(), episode_time, crossed_feet,
+            *(command.stop_errors & timed_out[:, None]).unbind(dim=1),
         ), dim=1)[finished])
         remaining -= finished.long()
         peak_speed.masked_fill_(finished, 0.0)
         lane_offset.masked_fill_(finished, 0.0)
         heading_error.masked_fill_(finished, 0.0)
+        crossed_feet.masked_fill_(finished, False)
 
-    distance, stops, falls, touches, misses, timeouts, peak, lateral, heading, duration = (
+    (distance, stops, falls, touches, misses, timeouts, peak, lateral, heading, duration, crossed,
+     timeout_gap, timeout_lateral, timeout_yaw, timeout_speed) = (
         torch.cat(results).T.cpu()
     )
     metrics = {
@@ -131,6 +141,11 @@ def evaluate_ball_sprint(env: RslRlVecEnvWrapper, policy: Callable, episodes: in
         "touches": int(touches.sum()),
         "misses": int(misses.sum()),
         "timeouts": int(timeouts.sum()),
+        "trials_with_crossed_feet": int(crossed.sum()),
+        "timeout_outside_forward_gap": int(timeout_gap.sum()),
+        "timeout_outside_lateral_band": int(timeout_lateral.sum()),
+        "timeout_yaw_above_limit": int(timeout_yaw.sum()),
+        "timeout_speed_above_limit": int(timeout_speed.sum()),
         "lane_offset_p95_m": lateral.quantile(0.95).item(),
         "heading_error_p95_deg": heading.quantile(0.95).item(),
         "median_stop_seconds": duration[stops.bool()].median().item() if stops.any() else None,

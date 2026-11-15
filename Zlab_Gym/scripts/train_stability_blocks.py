@@ -60,21 +60,23 @@ def save_state(state_file, state):
     pending.replace(state_file)
 
 
-def train_pilot(checkpoint, work_dir, blocks, updates, num_envs):
+def train_pilot(checkpoint, work_dir, blocks, updates, num_envs, control=None):
     """Evaluate every save and stop after the first block without a better policy."""
     state_file = work_dir / "progress.json"
+    finishing_pilot = control is not None
     friction = [os.environ.get("ZLAB_FOOT_FRICTION_MIN", "0.35"),
                 os.environ.get("ZLAB_FOOT_FRICTION_MAX", "1.15")]
     if state_file.exists():
         state = json.loads(state_file.read_text())
-        if state.get("mode") != "pilot":
+        if state.get("mode") != ("finishing" if finishing_pilot else "pilot"):
             raise ValueError("Use a separate work directory for the stability pilot.")
         if state["foot_friction"] != friction:
             raise ValueError("Use a fresh pilot work directory when changing foot friction.")
     else:
         baseline = work_dir / "baseline.pt"
         shutil.copyfile(checkpoint, baseline)
-        state = {"mode": "pilot", "checkpoint": str(baseline), "reports": None,
+        state = {"mode": "finishing" if finishing_pilot else "pilot",
+                 "checkpoint": str(baseline), "reports": None,
                  "block": 0, "stop_reason": None, "foot_friction": friction}
         save_state(state_file, state)
 
@@ -94,10 +96,14 @@ def train_pilot(checkpoint, work_dir, blocks, updates, num_envs):
         if state["reports"] is None:
             state["reports"] = evaluate_both(incumbent, directory, "baseline")
             save_state(state_file, state)
+        if finishing_pilot and "control_reports" not in state:
+            state["control_reports"] = evaluate_both(control, directory, "block-50-control")
+            save_state(state_file, state)
         runtime_env = dict(
             os.environ, ZLAB_PYTHON=sys.executable, ZLAB_LOG_ROOT=str(directory),
             ZLAB_TRAIN_SEED=str(41 + block), ZLAB_TORSO_PUSH_SCALE="0",
             ZLAB_OBSERVATION_NOISE_SCALE="0", ZLAB_SAVE_INTERVAL="100",
+            ZLAB_FINISHING_START_FRACTION="0.35" if finishing_pilot else "0",
         )
         subprocess.run([
             str(PROJECT / "train_ball_stability.sh"), str(incumbent), str(updates), str(num_envs),
@@ -114,7 +120,10 @@ def train_pilot(checkpoint, work_dir, blocks, updates, num_envs):
             reports = evaluate_both(candidate, directory, candidate.stem)
             improved = all(
                 new["stops"] > old["stops"]
-                and new["lane_offset_p95_m"] <= old["lane_offset_p95_m"] - 0.05
+                and new["lane_offset_p95_m"] <= old["lane_offset_p95_m"] + (
+                    0.05 if finishing_pilot else -0.05
+                )
+                and (not finishing_pilot or new["timeouts"] < old["timeouts"])
                 and new["falls"] <= old["falls"]
                 and new["touches"] <= old["touches"]
                 for old, new in zip(state["reports"], reports, strict=True)
@@ -130,6 +139,7 @@ def train_pilot(checkpoint, work_dir, blocks, updates, num_envs):
         save_state(directory / "comparison.json", {
             "seeds": PILOT_SEEDS, "baseline": str(incumbent),
             "baseline_reports": state["reports"], "candidates": comparisons,
+            **({"block_50_control_reports": state["control_reports"]} if finishing_pilot else {}),
         })
         state.update(block=block, latest_comparison=str(directory / "comparison.json"))
         if not qualified:
@@ -243,11 +253,15 @@ def main():
     parser.add_argument("--updates", type=int, default=300)
     parser.add_argument("--num-envs", type=int, default=512)
     parser.add_argument("--pilot-blocks", type=int, metavar="N")
+    parser.add_argument("--finishing-control", type=Path, metavar="CHECKPOINT",
+                        help="Run the finishing curriculum and evaluate this reference checkpoint.")
     args = parser.parse_args()
     if not 0 < args.hours < float("inf") or min(args.updates, args.num_envs) <= 0:
         parser.error("Use a finite, positive time budget and positive update and environment counts.")
     if args.pilot_blocks is not None and args.pilot_blocks <= 0:
         parser.error("--pilot-blocks must be positive.")
+    if args.finishing_control is not None and args.pilot_blocks is None:
+        parser.error("--finishing-control requires --pilot-blocks.")
     work_dir = args.work_dir.expanduser().resolve()
     work_dir.mkdir(parents=True, exist_ok=True)
     with (work_dir / "training.lock").open("a") as lock:
@@ -259,7 +273,10 @@ def main():
         if args.pilot_blocks is None:
             train_blocks(checkpoint, work_dir, args.hours, args.updates, args.num_envs)
         else:
-            train_pilot(checkpoint, work_dir, args.pilot_blocks, args.updates, args.num_envs)
+            control = args.finishing_control
+            if control is not None:
+                control = control.expanduser().resolve(strict=True)
+            train_pilot(checkpoint, work_dir, args.pilot_blocks, args.updates, args.num_envs, control)
 
 
 if __name__ == "__main__":
