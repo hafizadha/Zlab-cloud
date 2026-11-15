@@ -325,18 +325,31 @@ def ball_touch_penalty(env):
     return env.termination_manager.get_term("ball_touched")
 
 
+def lateral_velocity_error(robot, command, lateral):
+    sideways_speed = robot.root_link_lin_vel_w[:, 1]
+    if not command.cfg.lateral_correction:
+        return sideways_speed
+
+    yaw = robot.heading_w
+    forward_command, sideways_command, _ = command.command.unbind(dim=1)
+    target_speed = forward_command * yaw.sin() + sideways_command * yaw.cos()
+    # Track the correction off-center and blend toward a stationary hold near the lane.
+    blend = ((lateral.abs() - 0.15) / 0.10).clamp(0.0, 1.0)
+    return sideways_speed - blend * target_speed
+
+
 def lane_tracking_error(env):
     robot = env.scene["robot"].data
-    lane = env.command_manager.get_term("twist").ball_spawn_xy[:, 1]
-    lateral = robot.root_link_pos_w[:, 1] - lane
-    sideways_speed = robot.root_link_lin_vel_w[:, 1]
+    command = env.command_manager.get_term("twist")
+    lateral = robot.root_link_pos_w[:, 1] - command.ball_spawn_xy[:, 1]
+    sideways_error = lateral_velocity_error(robot, command, lateral)
     heading = wrap_to_pi(robot.heading_w)
     lane_error = (lateral / 0.30).abs()
     # Keep the existing quadratic cost near the lane and grow linearly beyond 0.60 m.
     lane_cost = lane_error.clamp_max(2.0).square() + 4.0 * (lane_error - 2.0).clamp_min(0.0)
     return (
         lane_cost
-        + (sideways_speed / 0.40).square().clamp_max(4.0)
+        + (sideways_error / 0.40).square().clamp_max(4.0)
         + (heading / math.radians(15)).square().clamp_max(4.0)
     ) / 3.0
 
@@ -352,21 +365,22 @@ def settle_reward(env):
     robot = env.scene["robot"].data
     offset = command.ball_spawn_xy - robot.root_link_pos_w[:, :2]
     position_error = (offset[:, 0] - 0.65).square() + offset[:, 1].square()
-    speed_error = robot.root_link_lin_vel_w[:, :2].square().sum(dim=1)
+    lateral_error = lateral_velocity_error(robot, command, -offset[:, 1])
+    speed_error = robot.root_link_lin_vel_w[:, 0].square() + lateral_error.square()
     return torch.exp(-position_error / 0.45**2 - speed_error / 0.5**2)
 
 
 def finishing_reward(env):
     robot = env.scene["robot"].data
-    target = env.command_manager.get_term("twist").ball_spawn_xy
-    offset = target - robot.root_link_pos_w[:, :2]
+    command = env.command_manager.get_term("twist")
+    offset = command.ball_spawn_xy - robot.root_link_pos_w[:, :2]
     forward_speed = robot.root_link_lin_vel_w[:, 0]
-    side_speed = robot.root_link_lin_vel_w[:, 1]
+    sideways_error = lateral_velocity_error(robot, command, -offset[:, 1])
     heading = wrap_to_pi(robot.heading_w)
-    # Near the ball, reward reducing sideways motion before the full stop is met.
+    # Near the ball, reward controlled correction and a settled finish.
     distance = ((offset[:, 0] - 0.65) / 0.9).square()
     alignment = (offset[:, 1] / 0.40).square() + (heading / math.radians(20)).square()
-    motion = (forward_speed / 0.9).square() + (side_speed / 0.35).square()
+    motion = (forward_speed / 0.9).square() + (sideways_error / 0.35).square()
     return torch.exp(-distance - 0.5 * (alignment + motion))
 
 

@@ -34,7 +34,7 @@ outside the lateral band on each seed. Falls and touches must stay at or below t
 checkpoint’s counts on each seed, and lane drift may increase by at most 5 cm.
 The pilot stops after the first block with no qualifying checkpoint.
 
-Read `progress.json` in `/kaggle/working/zlab-robocup-off-center-pilot` for
+Read `progress.json` in `/kaggle/working/zlab-robocup-sideways-reward-pilot` for
 the selected checkpoint and the path to `comparison.json`. The report
 includes the block 50 control, crossed-foot incidence, and overlapping
 timeout counts for gap, lateral offset, yaw, and speed. Start a new work
@@ -45,9 +45,10 @@ directory when changing traction.
 - Forward command tracking and progress reward encourage acceleration and
   running within the 2.8 m/s cap. Upright posture, smooth actions, low slip,
   and signed foot spacing discourage unstable and crossed steps.
-- Lane and heading costs apply across the approach. Brake tracking penalizes
-  excess forward speed near the ball. Finishing alignment gives credit for
-  slowing near the target while centered and facing forwards.
+- Lane and heading costs apply across the approach. When off-center, the
+  sideways part of the reward favors tracking the correction command. The
+  target blends toward zero sideways speed between 25 and 15 cm of lane
+  error. Brake tracking penalizes excess forward speed near the ball.
 - A clean 1.5 s hold earns 24 terminal reward units. Ball contact costs 25 and
   other failed trials cost 10. The evaluation does not reward jumping or
   claim that successful stops establish a human running gait. Check stride
