@@ -128,7 +128,11 @@ class OnPolicyRunner:
             )
 
             # Save model
-            if self.logger.writer is not None and it % self.cfg["save_interval"] == 0:
+            if (
+                self.logger.writer is not None
+                and it < total_it - 1
+                and (it + 1) % self.cfg["save_interval"] == 0
+            ):
                 self.save(os.path.join(self.logger.log_dir, f"model_{it}.pt"))  # type: ignore
 
         # Save the final model after training and stop the logging writer

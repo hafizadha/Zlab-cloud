@@ -8,9 +8,9 @@ if [[ "${1:-}" == --help || "${1:-}" == -h ]]; then
     exit 0
 fi
 
-updates="${2:-100}"
-num_envs="${3:-128}"
-save_interval="${ZLAB_SAVE_INTERVAL:-25}"
+updates="${2:-300}"
+num_envs="${3:-512}"
+save_interval="${ZLAB_SAVE_INTERVAL:-100}"
 if (( $# < 1 || $# > 3 )) || [[ ! "$updates" =~ ^[1-9][0-9]*$ || ! "$num_envs" =~ ^[1-9][0-9]*$ || ! "$save_interval" =~ ^[1-9][0-9]*$ ]]; then
     printf 'Supply a checkpoint and positive integer counts. See %s --help.\n' "$0" >&2
     exit 2

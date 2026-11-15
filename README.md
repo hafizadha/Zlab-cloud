@@ -20,16 +20,19 @@ Internet access. The notebook clones `main` and starts from the bundled
 by default, or until all stability profiles pass. Kaggle can end the
 session according to its own runtime and quota limits.
 
-The notebook uses 128 environments per visible T4, 100 updates per block,
-and saves every 25 updates plus the final update. The first block loads 1400's
+The notebook uses 512 environments per visible T4, 300 updates per block,
+and saves every 100 updates plus the final update. The first block loads 1400's
 actor, preserves its observer normalization, caps initial action exploration,
 and starts a fresh critic and optimizer for the changed task. Later blocks
-load the retained actor and critic with a fresh optimizer. Use
-`/kaggle/working/zlab-ball-stability/progress.json` to find the selected
-checkpoint and completed profile. Keep the work directory to resume within the
-same session. In a new session, supply the retained checkpoint as the starting
-checkpoint. Copy the corresponding work directory too if you want to retain
-the saved progress, and keep its paths accessible.
+continue from the previous block’s actor, critic, and optimizer. Training
+starts from the checkpoint that passed the gates when the profile advances.
+In `/kaggle/working/zlab-ball-stability/progress.json`, `checkpoint` is the
+best evaluated checkpoint and `training_checkpoint` is the continuation
+checkpoint. `latest_metrics` records the latest block result even when it
+misses the gate. Keep the work directory to resume within the same session.
+In a new session, supply the desired checkpoint as the starting checkpoint.
+Copy the corresponding work directory to retain the saved progress, and keep
+its paths accessible. Older progress files resume from their selected checkpoint.
 
 For optional Hugging Face backups, supply a write-capable `HF_TOKEN` in
 Kaggle Secrets and enable uploads in the notebook. Periodic training
@@ -45,8 +48,8 @@ The selection file identifies which checkpoint to use.
 2. Keep 2.8 m/s throughout the robustness blocks. Increase torso pushes and
    sensor noise together through quarter, half, and full configured strength.
    Every block evaluates its final checkpoint on the same 48 trials as the
-   incumbent. Favor zero touches, fewer falls, more clean stops, and lower lane
-   and heading error, in that order. Each profile must pass on a second seed
+   incumbent. Favor passing the gate, then more clean stops, fewer touches and falls,
+   and lower lane and heading error. Each profile must pass on a second seed
    and the clean profile before the next increase. The gates are at least
    46/48 clean stops, zero touches, at most one fall, ≤0.30 m at the 95th
    percentile of maximum lane offset, and ≤15° at the 95th percentile of
@@ -73,7 +76,7 @@ Run a single block with Python 3.10–3.13, CUDA PyTorch and `flock`.
 ```bash
 cd Zlab_Gym
 python -m pip install -e . onnx
-./train_ball_stability.sh checkpoints/model_1400.pt 100 128
+./train_ball_stability.sh checkpoints/model_1400.pt 300 512
 ```
 
 Set `ZLAB_TORSO_PUSH_SCALE` and `ZLAB_OBSERVATION_NOISE_SCALE` for a manual

@@ -1,4 +1,4 @@
-"""Train bounded stability blocks and retain the best evaluated checkpoint."""
+"""Continue PPO across bounded blocks and retain the best evaluated checkpoint."""
 
 import argparse
 import fcntl
@@ -46,7 +46,8 @@ def passes_gate(metrics):
 
 def rank(metrics):
     return (
-        passes_gate(metrics), -metrics["touches"], -metrics["falls"], metrics["stops"],
+        passes_gate(metrics), metrics["stops"],
+        -metrics["touches"], -metrics["falls"],
         -metrics["lane_offset_p95_m"], -metrics["heading_error_p95_deg"],
     )
 
@@ -61,11 +62,12 @@ def train_blocks(checkpoint, work_dir, hours, updates, num_envs):
     work_dir.mkdir(parents=True, exist_ok=True)
     state_file = work_dir / "progress.json"
     state = {
-        "checkpoint": str(checkpoint), "block": 0, "profile": 0,
-        "metrics": None, "complete": False,
+        "checkpoint": str(checkpoint), "training_checkpoint": str(checkpoint),
+        "block": 0, "profile": 0, "metrics": None, "complete": False,
     }
     if state_file.exists():
         state = json.loads(state_file.read_text())
+        state.setdefault("training_checkpoint", state["checkpoint"])
     deadline = time.monotonic() + hours * 3600
     block_seconds = 0.0
 
@@ -73,7 +75,8 @@ def train_blocks(checkpoint, work_dir, hours, updates, num_envs):
     friction = [os.environ.get("ZLAB_FOOT_FRICTION_MIN", "0.35"),
                 os.environ.get("ZLAB_FOOT_FRICTION_MAX", "1.15")]
     if state.get("foot_friction") != friction:
-        state.update(foot_friction=friction, profile=0, metrics=None, complete=False)
+        state.update(foot_friction=friction, profile=0, metrics=None, complete=False,
+                     training_checkpoint=state["checkpoint"], last_gate_check=None)
 
     while not state["complete"] and time.monotonic() + block_seconds < deadline:
         started = time.monotonic()
@@ -83,6 +86,7 @@ def train_blocks(checkpoint, work_dir, hours, updates, num_envs):
         incumbent = Path(state["checkpoint"])
         if state["metrics"] is None:
             state["metrics"] = evaluate(incumbent, block_dir, "incumbent", profile)
+        training_checkpoint = state["training_checkpoint"]
 
         runtime_env = dict(
             os.environ,
@@ -92,15 +96,16 @@ def train_blocks(checkpoint, work_dir, hours, updates, num_envs):
             ZLAB_TORSO_PUSH_SCALE=str(profile[0]),
             ZLAB_OBSERVATION_NOISE_SCALE=str(profile[1]),
         )
-        print(f"[BALL STABILITY] Block {block}, push/noise {profile}, starting from {incumbent}", flush=True)
+        print(f"[BALL STABILITY] Block {block}, push/noise {profile}, starting from {training_checkpoint}", flush=True)
         subprocess.run([
-            str(PROJECT / "train_ball_stability.sh"), str(incumbent), str(updates), str(num_envs),
+            str(PROJECT / "train_ball_stability.sh"), training_checkpoint, str(updates), str(num_envs),
         ], cwd=PROJECT, env=runtime_env, check=True)
         candidate = max(
             block_dir.glob("rsl_rl/*/*/model_*.pt"),
             key=lambda path: int(path.stem.split("_")[-1]),
         )
         metrics = evaluate(candidate, block_dir, "candidate", profile)
+        state.update(training_checkpoint=str(candidate), latest_metrics=metrics)
         if rank(metrics) > rank(state["metrics"]):
             # Check that the candidate still works without the extra disturbances.
             if state["profile"] == 0 or passes_gate(
@@ -108,19 +113,31 @@ def train_blocks(checkpoint, work_dir, hours, updates, num_envs):
             ):
                 state.update(checkpoint=str(candidate), metrics=metrics)
 
-        if passes_gate(state["metrics"]):
-            selected = Path(state["checkpoint"])
-            held_out = evaluate(selected, block_dir, "held-out", profile, seed=9187)
-            clean = evaluate(selected, block_dir, "clean", PROFILES[0], seed=9187)
+        selected = Path(state["checkpoint"])
+        if passes_gate(metrics):
+            gate_checkpoint, gate_metrics = candidate, metrics
+        else:
+            gate_checkpoint, gate_metrics = selected, state["metrics"]
+        if passes_gate(gate_metrics) and str(gate_checkpoint) != state.get("last_gate_check"):
+            held_out = evaluate(gate_checkpoint, block_dir, "held-out", profile, seed=9187)
+            clean = (held_out if profile == PROFILES[0] else
+                     evaluate(gate_checkpoint, block_dir, "clean", PROFILES[0], seed=9187))
+            if gate_checkpoint == selected:
+                state["last_gate_check"] = str(selected)
             if passes_gate(held_out) and passes_gate(clean):
+                state.update(checkpoint=str(gate_checkpoint), metrics=gate_metrics)
                 if state["profile"] == len(PROFILES) - 1:
                     state["complete"] = True
                 else:
-                    state.update(profile=state["profile"] + 1, metrics=None)
+                    state.update(profile=state["profile"] + 1, metrics=None,
+                                 training_checkpoint=str(gate_checkpoint), last_gate_check=None)
 
         state["block"] = block
         save_state(state_file, state)
-        print(f"[BALL STABILITY] Retained {state['checkpoint']}", flush=True)
+        print(f"[BALL STABILITY] Block {block} result: "
+              f"{metrics['stops']}/{EPISODES} clean stops, {metrics['falls']} falls, "
+              f"{metrics['touches']} touches. Best evaluated checkpoint {state['checkpoint']}. "
+              f"Training checkpoint {state['training_checkpoint']}.", flush=True)
         block_seconds = max(block_seconds, time.monotonic() - started)
 
     print(f"[BALL STABILITY] {'Passed all profiles' if state['complete'] else 'Time budget reached'}. "
@@ -132,8 +149,8 @@ def main():
     parser.add_argument("checkpoint", type=Path)
     parser.add_argument("--work-dir", type=Path, required=True)
     parser.add_argument("--hours", type=float, default=9.0)
-    parser.add_argument("--updates", type=int, default=100)
-    parser.add_argument("--num-envs", type=int, default=128)
+    parser.add_argument("--updates", type=int, default=300)
+    parser.add_argument("--num-envs", type=int, default=512)
     args = parser.parse_args()
     if not 0 < args.hours < float("inf") or min(args.updates, args.num_envs) <= 0:
         parser.error("Use a finite, positive time budget and positive update and environment counts.")
