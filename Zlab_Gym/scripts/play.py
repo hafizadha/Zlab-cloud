@@ -23,7 +23,8 @@ from mjlab.viewer import NativeMujocoViewer, ViserPlayViewer
 import src.tasks  # noqa: F401
 from src.tasks.velocity.config.z01_std_add_head import TASK_ID
 from src.tasks.velocity.config.z01_std_add_head.ball_sprint import (
-    DEFAULT_FOOT_FRICTION, STABILITY_SPEED, set_foot_friction, set_observation_noise, set_push_strength,
+    DEFAULT_FOOT_FRICTION, PITCH_START_X, STABILITY_SPEED,
+    set_foot_friction, set_observation_noise, set_push_strength,
 )
 
 
@@ -98,7 +99,7 @@ def evaluate_ball_sprint(env: RslRlVecEnvWrapper, policy: Callable, episodes: in
     heading_error = torch.zeros_like(peak_speed)
     results = []
     while remaining.any():
-        distance = command.ball_spawn_xy[:, 0] - simulation.scene.env_origins[:, 0]
+        distance = command.ball_spawn_xy[:, 0] - simulation.scene.env_origins[:, 0] - PITCH_START_X
         episode_time = (simulation.episode_length_buf + 1) * simulation.step_dt
         peak_speed = torch.maximum(peak_speed, robot.root_link_lin_vel_w[:, 0])
         lateral_position = robot.root_link_pos_w[:, 1] - simulation.scene.env_origins[:, 1]

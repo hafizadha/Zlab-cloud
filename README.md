@@ -14,25 +14,23 @@ The robot uses its existing position servos to hold the targets.
 
 ## Kaggle T4 training
 
-Open [zlab-training.ipynb](zlab-training.ipynb) with a GPU accelerator and
-Internet access. The notebook clones `main` and starts from the bundled
-`Zlab_Gym/checkpoints/model_1400.pt`. Training runs for a budget of nine hours
-by default, or until all stability profiles pass. Kaggle can end the
-session according to its own runtime and quota limits.
+Open [zlab-training.ipynb](zlab-training.ipynb) in Kaggle, select a T4 GPU,
+and run all cells. The notebook clones `main` and uses the bundled block 50
+checkpoint, `Zlab_Gym/checkpoints/model_199_b50.pt`. The original 1400
+checkpoint is also available.
 
-The notebook uses 512 environments per visible T4, 300 updates per block,
-and saves every 100 updates plus the final update. The first block loads 1400's
-actor, preserves its observer normalization, caps initial action exploration,
-and starts a fresh critic and optimizer for the changed task. Later blocks
-continue from the previous block’s actor, critic, and optimizer. Training
-starts from the checkpoint that passed the gates when the profile advances.
-In `/kaggle/working/zlab-ball-stability/progress.json`, `checkpoint` is the
-best evaluated checkpoint and `training_checkpoint` is the continuation
-checkpoint. `latest_metrics` records the latest block result even when it
-misses the gate. Keep the work directory to resume within the same session.
-In a new session, supply the desired checkpoint as the starting checkpoint.
-Copy the corresponding work directory to retain the saved progress, and keep
-its paths accessible. Older progress files resume from their selected checkpoint.
+The default pilot runs one block of 300 updates at 512 environments per GPU.
+Each checkpoint at 100, 200, and 300 updates is compared with the starting
+policy on two sets of 48 trials, with pushes and sensor noise disabled. To
+replace the baseline, a candidate must improve clean stops and reduce
+95th-percentile lane drift by at least 0.05 m on both seeds, with falls and
+touches at or below baseline on each seed. The pilot stops after the first
+block with no qualifying checkpoint. Increase `PILOT_BLOCKS` to allow further
+blocks if training improves.
+
+Read `progress.json` in `/kaggle/working/zlab-robocup-block50-pilot` for the
+selected checkpoint and the path to `comparison.json`. Use a new work
+directory for a fresh comparison or different traction settings.
 
 For optional Hugging Face backups, supply a write-capable `HF_TOKEN` in
 Kaggle Secrets and enable uploads in the notebook. Periodic training
@@ -41,11 +39,11 @@ The selection file identifies which checkpoint to use.
 
 ## Stability training plan
 
-1. Start from 1400 at 2.8 m/s with zero pushes and sensor noise. Maintain
+1. Establish stopping performance at 2.8 m/s with zero pushes and sensor noise. Maintain
    randomized start position and heading, surface friction, mass, encoder bias,
    motor gains, and actuator delay. Review lane offset and heading alongside
    successful stops.
-2. Keep 2.8 m/s throughout the robustness blocks. Increase torso pushes and
+2. For the optional robustness curriculum, keep 2.8 m/s throughout. Increase torso pushes and
    sensor noise together through quarter, half, and full configured strength.
    Every block evaluates its final checkpoint on the same 48 trials as the
    incumbent. Favor passing the gate, then more clean stops, fewer touches and falls,
@@ -97,9 +95,10 @@ python scripts/play.py --checkpoint-file /absolute/path/to/model.pt \
 
 ## Transfer to the 22 × 14 m artificial-turf field
 
-Use the 5–11 m training drill in the middle of the pitch first. The simulator
-uses a flat plane with randomized foot traction, motor lag, and contact
-disturbances. The default friction range (0.35–1.15) represents simulation
+Each simulated world uses a rectangular 22 × 14 m playing boundary. The drill
+starts 6 m behind the center line and places the ball 5–11 m ahead along the
+center lane. Leaving the pitch is counted as a miss. The simulator uses a
+flat plane with randomized foot traction and motor lag. The default friction range (0.35–1.15) represents simulation
 uncertainty. This model approximates traction and samples 0–15 ms of motor
 command lag. Turf compliance, surface roughness, gearbox backlash, voltage
 sag, and motor temperature still need physical characterization. Measure

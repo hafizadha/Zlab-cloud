@@ -5,6 +5,7 @@ import fcntl
 import json
 import os
 from pathlib import Path
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -16,6 +17,7 @@ PROJECT = Path(__file__).resolve().parents[1]
 PROFILES = ((0.0, 0.0), (0.25, 0.25), (0.5, 0.5), (1.0, 1.0))
 EPISODES = 48
 EVALUATION_SEED = 2401
+PILOT_SEEDS = (EVALUATION_SEED, 9187)
 
 
 def evaluate(checkpoint, block_dir, name, profile, *, seed=EVALUATION_SEED):
@@ -56,6 +58,95 @@ def save_state(state_file, state):
     pending = state_file.with_suffix(".tmp")
     pending.write_text(json.dumps(state, indent=2) + "\n")
     pending.replace(state_file)
+
+
+def train_pilot(checkpoint, work_dir, blocks, updates, num_envs):
+    """Evaluate every save and stop after the first block without a better policy."""
+    state_file = work_dir / "progress.json"
+    friction = [os.environ.get("ZLAB_FOOT_FRICTION_MIN", "0.35"),
+                os.environ.get("ZLAB_FOOT_FRICTION_MAX", "1.15")]
+    if state_file.exists():
+        state = json.loads(state_file.read_text())
+        if state.get("mode") != "pilot":
+            raise ValueError("Use a separate work directory for the stability pilot.")
+        if state["foot_friction"] != friction:
+            raise ValueError("Use a fresh pilot work directory when changing foot friction.")
+    else:
+        baseline = work_dir / "baseline.pt"
+        shutil.copyfile(checkpoint, baseline)
+        state = {"mode": "pilot", "checkpoint": str(baseline), "reports": None,
+                 "block": 0, "stop_reason": None, "foot_friction": friction}
+        save_state(state_file, state)
+
+    def evaluate_both(path, directory, name):
+        return [
+            evaluate(path, directory, f"{name}-seed-{seed}", PROFILES[0], seed=seed)
+            for seed in PILOT_SEEDS
+        ]
+
+    if state["stop_reason"] == "no_improvement":
+        print(f"[BALL STABILITY] Pilot already stopped. Checkpoint: {state['checkpoint']}", flush=True)
+        return
+
+    for block in range(state["block"] + 1, blocks + 1):
+        directory = Path(tempfile.mkdtemp(prefix=f"pilot-{block:03d}-", dir=work_dir))
+        incumbent = Path(state["checkpoint"])
+        if state["reports"] is None:
+            state["reports"] = evaluate_both(incumbent, directory, "baseline")
+            save_state(state_file, state)
+        runtime_env = dict(
+            os.environ, ZLAB_PYTHON=sys.executable, ZLAB_LOG_ROOT=str(directory),
+            ZLAB_TRAIN_SEED=str(41 + block), ZLAB_TORSO_PUSH_SCALE="0",
+            ZLAB_OBSERVATION_NOISE_SCALE="0", ZLAB_SAVE_INTERVAL="100",
+        )
+        subprocess.run([
+            str(PROJECT / "train_ball_stability.sh"), str(incumbent), str(updates), str(num_envs),
+        ], cwd=PROJECT, env=runtime_env, check=True)
+        candidates = sorted(
+            directory.glob("rsl_rl/*/*/model_*.pt"), key=lambda path: int(path.stem.split("_")[-1])
+        )
+        if not candidates:
+            raise RuntimeError(f"Training completed without a checkpoint in {directory}")
+
+        qualified = []
+        comparisons = []
+        for candidate in candidates:
+            reports = evaluate_both(candidate, directory, candidate.stem)
+            improved = all(
+                new["stops"] > old["stops"]
+                and new["lane_offset_p95_m"] <= old["lane_offset_p95_m"] - 0.05
+                and new["falls"] <= old["falls"]
+                and new["touches"] <= old["touches"]
+                for old, new in zip(state["reports"], reports, strict=True)
+            )
+            comparisons.append({"checkpoint": str(candidate), "reports": reports,
+                                "improved_on_both_seeds": improved})
+            if improved:
+                qualified.append((candidate, reports))
+            print(f"[BALL STABILITY] {candidate.name}: "
+                  f"{'improved on both seeds' if improved else 'missed the improvement criteria'}",
+                  flush=True)
+
+        save_state(directory / "comparison.json", {
+            "seeds": PILOT_SEEDS, "baseline": str(incumbent),
+            "baseline_reports": state["reports"], "candidates": comparisons,
+        })
+        state.update(block=block, latest_comparison=str(directory / "comparison.json"))
+        if not qualified:
+            state["stop_reason"] = "no_improvement"
+            save_state(state_file, state)
+            print(f"[BALL STABILITY] Stopping: no save improved on both seeds. "
+                  f"Kept {incumbent}.", flush=True)
+            return
+
+        selected, reports = max(qualified, key=lambda entry: (
+            sum(report["stops"] for report in entry[1]),
+            -sum(report["lane_offset_p95_m"] for report in entry[1]),
+        ))
+        state.update(checkpoint=str(selected), reports=reports, stop_reason=None)
+        save_state(state_file, state)
+        print(f"[BALL STABILITY] Selected {selected}.", flush=True)
+    print(f"[BALL STABILITY] Pilot block limit reached. Checkpoint: {state['checkpoint']}", flush=True)
 
 
 def train_blocks(checkpoint, work_dir, hours, updates, num_envs):
@@ -151,9 +242,12 @@ def main():
     parser.add_argument("--hours", type=float, default=9.0)
     parser.add_argument("--updates", type=int, default=300)
     parser.add_argument("--num-envs", type=int, default=512)
+    parser.add_argument("--pilot-blocks", type=int, metavar="N")
     args = parser.parse_args()
     if not 0 < args.hours < float("inf") or min(args.updates, args.num_envs) <= 0:
         parser.error("Use a finite, positive time budget and positive update and environment counts.")
+    if args.pilot_blocks is not None and args.pilot_blocks <= 0:
+        parser.error("--pilot-blocks must be positive.")
     work_dir = args.work_dir.expanduser().resolve()
     work_dir.mkdir(parents=True, exist_ok=True)
     with (work_dir / "training.lock").open("a") as lock:
@@ -161,8 +255,11 @@ def main():
             fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
         except BlockingIOError:
             parser.error(f"Training is already running in {work_dir}.")
-        train_blocks(args.checkpoint.expanduser().resolve(strict=True),
-                     work_dir, args.hours, args.updates, args.num_envs)
+        checkpoint = args.checkpoint.expanduser().resolve(strict=True)
+        if args.pilot_blocks is None:
+            train_blocks(checkpoint, work_dir, args.hours, args.updates, args.num_envs)
+        else:
+            train_pilot(checkpoint, work_dir, args.pilot_blocks, args.updates, args.num_envs)
 
 
 if __name__ == "__main__":

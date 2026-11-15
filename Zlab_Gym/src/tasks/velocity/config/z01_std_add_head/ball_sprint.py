@@ -26,6 +26,9 @@ from .env_cfgs import _ROOT_BODY_NAME, z01_std_add_head_flat_env_cfg
 
 BALL_RADIUS = 0.11
 STABILITY_SPEED = 2.8
+PITCH_HALF_LENGTH = 11.0
+PITCH_HALF_WIDTH = 7.0
+PITCH_START_X = -6.0
 DEFAULT_FOOT_FRICTION = (0.35, 1.15)
 CHECKPOINT_TASK = "straight-ball-sprint"
 STABILITY_STAGE = "stability-2.8"
@@ -47,7 +50,7 @@ def apply_walking_profile(cfg):
     stiffness = dict(zip(names, map(float, metadata["joint_stiffness"]), strict=True))
     damping = dict(zip(names, map(float, metadata["joint_damping"]), strict=True))
     robot = cfg.scene.entities["robot"]
-    robot.init_state = replace(robot.init_state, joint_pos=default_pose, pos=(0.0, 0.0, 0.85))
+    robot.init_state = replace(robot.init_state, joint_pos=default_pose, pos=(PITCH_START_X, 0.0, 0.85))
     actuators = []
     for actuator in robot.articulation.actuators:
         base = actuator.base_cfg
@@ -240,9 +243,15 @@ class StraightBallSprintCommand(CommandTerm):
     def missed_ball(self):
         env = self._env
         ball_xy = env.scene["ball"].data.root_link_pos_w[:, :2]
-        robot_x = env.scene["robot"].data.root_link_pos_w[:, 0]
+        robot_xy = env.scene["robot"].data.root_link_pos_w[:, :2]
+        pitch_position = robot_xy - env.scene.env_origins[:, :2]
+        outside_pitch = (
+            (pitch_position[:, 0].abs() > PITCH_HALF_LENGTH)
+            | (pitch_position[:, 1].abs() > PITCH_HALF_WIDTH)
+        )
         return (
-            (robot_x > self.ball_spawn_xy[:, 0] - 0.25)
+            outside_pitch
+            | (robot_xy[:, 0] > self.ball_spawn_xy[:, 0] - 0.25)
             | ((ball_xy - self.ball_spawn_xy).norm(dim=1) > 0.15)
         )
 
@@ -252,7 +261,7 @@ def reset_straight_ball(env, env_ids):
     ball = env.scene["ball"]
     state = ball.data.default_root_state[env_ids].clone()
     distances = torch.empty(len(env_ids), device=env.device).uniform_(*command.cfg.ball_distance_range)
-    state[:, 0] = distances
+    state[:, 0] = PITCH_START_X + distances
     state[:, 1] = 0.0
     state[:, :3] += env.scene.env_origins[env_ids]
     state[:, 7:] = 0.0
@@ -286,8 +295,11 @@ def lane_tracking_error(env):
     lateral = robot.root_link_pos_w[:, 1] - env.scene.env_origins[:, 1]
     sideways_speed = robot.root_link_lin_vel_w[:, 1]
     heading = wrap_to_pi(robot.heading_w)
+    lane_error = (lateral / 0.30).abs()
+    # Keep the existing quadratic cost near the lane and grow linearly beyond 0.60 m.
+    lane_cost = lane_error.clamp_max(2.0).square() + 4.0 * (lane_error - 2.0).clamp_min(0.0)
     return (
-        (lateral / 0.30).square().clamp_max(4.0)
+        lane_cost
         + (sideways_speed / 0.40).square().clamp_max(4.0)
         + (heading / math.radians(15)).square().clamp_max(4.0)
     ) / 3.0
@@ -386,7 +398,7 @@ def ball_approach_env_cfg(play=False):
     )
     cfg.scene.entities["ball"] = EntityCfg(
         spec_fn=_ball_spec,
-        init_state=EntityCfg.InitialStateCfg(pos=(5.0, 0.0, BALL_RADIUS)),
+        init_state=EntityCfg.InitialStateCfg(pos=(PITCH_START_X + 5.0, 0.0, BALL_RADIUS)),
     )
     cfg.scene.sensors += (
         ContactSensorCfg(
