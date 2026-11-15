@@ -296,13 +296,16 @@ def reset_straight_ball(env, env_ids):
                 left = torch.rand_like(offset) < 0.5
                 state[short, 1] = torch.where(left, offset, -offset)
                 velocities[:, 0].uniform_(0.35, 0.90)
-                # Use two sevenths of the finishing starts for stationary holds.
+                # Use two sevenths of the finishing starts for close holds.
                 # At the pilot's 35% finishing rate this is 10% of all episodes.
                 stationary = torch.rand_like(offset) < 2 / 7
                 stationary_rows = short_rows[stationary]
                 distances[stationary_rows] = torch.empty_like(distances[stationary_rows]).uniform_(0.68, 0.85)
                 state[stationary_rows, 1] = 0.0
-                velocities[stationary, 0] = 0.0
+                if command.cfg.early_braking:
+                    velocities[stationary, 0] = torch.empty_like(offset[stationary]).uniform_(-0.18, 0.18)
+                else:
+                    velocities[stationary, 0] = 0.0
             else:
                 distances[short] = torch.empty_like(distances[short]).uniform_(2.0, 4.5)
                 velocities[:, 0].uniform_(0.8, 1.6)
