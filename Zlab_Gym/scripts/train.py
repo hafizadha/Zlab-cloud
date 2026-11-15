@@ -89,6 +89,8 @@ def run_train(task_id: str, cfg: TrainConfig, log_dir: Path) -> None:
         cfg.env.rewards["stop_lateral_instability"] = RewardTermCfg(
             func=stop_lateral_instability, weight=-1.5,
         )
+        # Scale the existing dt-normalized terminal cost from 25 to 40 units.
+        cfg.env.rewards["ball_touch"].weight *= 40.0 / 25.0
     set_push_strength(cfg.env, cfg.torso_push_scale)
     set_observation_noise(cfg.env, cfg.observation_noise_scale)
     set_foot_friction(cfg.env, (cfg.foot_friction_min, cfg.foot_friction_max))

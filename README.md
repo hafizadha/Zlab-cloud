@@ -28,9 +28,9 @@ help it finish braking and stand. About 65% of resets are full approaches,
 
 The evaluation uses full approaches at 2.8 m/s with the earlier braking
 profile and a continuous five-second hold. It compares each save against
-1199 on seeds 75169 and 85313 and records 1499 as a reference. Read
+1199 on seeds 97103 and 108173 and records 1499 as a reference. Read
 `progress.json` and `comparison.json` under
-`/kaggle/working/zlab-robocup-early-braking-pilot`. To preview the pilot's
+`/kaggle/working/zlab-robocup-contact-avoidance-pilot`. To preview the pilot's
 controller in `scripts/play.py`, pass `--early-braking True`.
 
 ### Rewards for the running approach and stop
@@ -44,8 +44,7 @@ controller in `scripts/play.py`, pass `--early-braking True`.
   error. Sideways tracking gets more weight near the ball while off-center.
   Brake tracking penalizes excess forward speed near the ball. The pilot also
   penalizes forward speed above 2.9 m/s and backward drift during the final approach.
-- A clean 5 s hold earns 24 terminal reward units. Ball contact costs 25 and
-  other failed trials cost 10. The evaluation does not reward jumping or
+- A clean 5 s hold earns 24 terminal reward units. Ball contact costs 40 in the early-braking pilot and 25 in standard training. Other failed trials cost 10. The evaluation does not reward jumping or
   claim that successful stops establish a human running gait. Check stride
   alternation and foot clearance in replay before adding stronger disturbances.
 
