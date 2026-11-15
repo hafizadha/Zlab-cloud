@@ -44,6 +44,7 @@ class TrainConfig:
     checkpoint: Path | None = None
     observation_noise_scale: float = 0.0
     finishing_start_fraction: float = 0.0
+    lateral_correction: bool = False
     foot_friction_min: float = DEFAULT_FOOT_FRICTION[0]
     foot_friction_max: float = DEFAULT_FOOT_FRICTION[1]
     torso_push_scale: float = 0.0
@@ -80,6 +81,7 @@ def run_train(task_id: str, cfg: TrainConfig, log_dir: Path) -> None:
         raise ValueError("Finishing start fraction must be between 0 and 1.")
     cfg.env.commands["twist"].speed_cap = STABILITY_SPEED
     cfg.env.commands["twist"].finishing_start_fraction = cfg.finishing_start_fraction
+    cfg.env.commands["twist"].lateral_correction = cfg.lateral_correction
     set_push_strength(cfg.env, cfg.torso_push_scale)
     set_observation_noise(cfg.env, cfg.observation_noise_scale)
     set_foot_friction(cfg.env, (cfg.foot_friction_min, cfg.foot_friction_max))

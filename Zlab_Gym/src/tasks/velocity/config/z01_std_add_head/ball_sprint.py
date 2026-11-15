@@ -181,6 +181,7 @@ class StraightBallSprintCommandCfg(CommandTermCfg):
     speed_cap: float = STABILITY_SPEED
     ball_distance_range: tuple[float, float] = (5.0, 11.0)
     finishing_start_fraction: float = 0.0
+    lateral_correction: bool = False
 
     def build(self, env):
         return StraightBallSprintCommand(self, env)
@@ -216,6 +217,12 @@ class StraightBallSprintCommand(CommandTerm):
         self._command[:, 0] = braking_speed.minimum(self._speed)
 
         lateral = robot.root_link_pos_w[:, 1] - env.scene.env_origins[:, 1]
+        if self.cfg.lateral_correction:
+            # Transform pitch-frame correction into the actor's body-frame lateral command.
+            yaw = robot.heading_w
+            pitch_lateral_speed = (-0.5 * lateral).clamp(-0.35, 0.35)
+            body_lateral_speed = pitch_lateral_speed * yaw.cos() - self._command[:, 0] * yaw.sin()
+            self._command[:, 1] = body_lateral_speed.clamp(-0.35, 0.35)
         lane_heading = (-0.20 * lateral).clamp(-0.30, 0.30)
         self._command[:, 2] = (1.5 * wrap_to_pi(lane_heading - robot.heading_w)).clamp(-0.6, 0.6)
 

@@ -44,6 +44,7 @@ class PlayConfig:
     foot_friction_min: float = DEFAULT_FOOT_FRICTION[0]
     foot_friction_max: float = DEFAULT_FOOT_FRICTION[1]
     metrics_file: Path | None = None
+    lateral_correction: bool = False
 
 
 def run_play(cfg: PlayConfig) -> None:
@@ -61,6 +62,7 @@ def run_play(cfg: PlayConfig) -> None:
         set_push_strength(env_cfg, cfg.torso_push_scale)
     set_observation_noise(env_cfg, cfg.observation_noise_scale)
     set_foot_friction(env_cfg, (cfg.foot_friction_min, cfg.foot_friction_max))
+    env_cfg.commands["twist"].lateral_correction = cfg.lateral_correction
     env_cfg.scene.num_envs = cfg.num_envs
     env_cfg.seed = cfg.seed
     rl_cfg = load_rl_cfg(TASK_ID)
