@@ -23,6 +23,7 @@ def feet_lateral_distance(
     command_name: str | None = None,
     command_threshold: float = 0.05,
     asset_cfg: SceneEntityCfg = _DEFAULT_ASSET_CFG,
+    penalize_crossing: bool = False,
 ) -> torch.Tensor:
     """Penalize feet getting too close in the pelvis-yaw lateral direction."""
     asset: Entity = env.scene[asset_cfg.name]
@@ -33,7 +34,9 @@ def feet_lateral_distance(
     foot_pos_rel_w = foot_pos_w - base_pos_w.unsqueeze(1)
     base_yaw_quat = yaw_quat(base_quat_w).unsqueeze(1).expand(-1, foot_pos_rel_w.shape[1], -1)
     foot_pos_yaw = quat_apply_inverse(base_yaw_quat, foot_pos_rel_w)
-    lateral_distance = torch.abs(foot_pos_yaw[:, 0, 1] - foot_pos_yaw[:, 1, 1])
+    signed_distance = foot_pos_yaw[:, 0, 1] - foot_pos_yaw[:, 1, 1]
+    # With ordered left/right sites, crossing the feet produces a negative distance.
+    lateral_distance = signed_distance if penalize_crossing else signed_distance.abs()
 
     cost = torch.square(torch.clamp(
         (min_distance - lateral_distance) / min_distance, min=0.0))

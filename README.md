@@ -5,7 +5,8 @@ the ball 5–11 m ahead. A clean stop requires the robot to settle within 1 m
 of the ball for 0.4 s, below 0.25 m/s, within 0.25 m laterally, and with yaw
 within 12° of the lane. Robot–ball contact ends the approach and costs 25
 reward units. Other failed attempts cost 10. Lane offset, sideways velocity,
-and yaw error are penalized throughout the approach.
+and yaw error are penalized throughout the approach. Foot spacing uses signed
+left-to-right separation to penalize cross-steps during both running and braking.
 
 The controller holds head pitch/yaw and all six wrist joints at their nominal
 targets. The actor still has 29 action channels so checkpoint 1400 can load.
@@ -28,7 +29,7 @@ touches at or below baseline on each seed. The pilot stops after the first
 block with no qualifying checkpoint. Increase `PILOT_BLOCKS` to allow further
 blocks if training improves.
 
-Read `progress.json` in `/kaggle/working/zlab-robocup-block50-pilot` for the
+Read `progress.json` in `/kaggle/working/zlab-robocup-foot-spacing-pilot` for the
 selected checkpoint and the path to `comparison.json`. Use a new work
 directory for a fresh comparison or different traction settings.
 

@@ -121,6 +121,9 @@ def set_observation_noise(cfg, scale: float) -> None:
 def _base_sprint_env_cfg(play: bool):
     cfg = z01_std_add_head_flat_env_cfg(play=play)
     apply_walking_profile(cfg)
+    foot_spacing = cfg.rewards["feet_lateral_distance"]
+    foot_spacing.params.update(command_name=None, penalize_crossing=True)
+    foot_spacing.params["asset_cfg"].preserve_order = True
     cfg.curriculum.pop("command_vel", None)
     cfg.events["reset_base"].params.update(pose_range={}, velocity_range={})
     cfg.events["reset_robot_joints"].params.update(
