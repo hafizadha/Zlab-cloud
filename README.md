@@ -13,9 +13,9 @@ targets. The actor still has 29 action channels so checkpoint 1400 can load.
 The exported ONNX metadata carries a zero action scale for each held joint.
 The robot uses its existing position servos to hold the targets.
 
-## Kaggle T4 notebook
+## CPU validation notebook
 
-The default notebook compares 999 and both 1199 checkpoints at 2.8 m/s
+The default notebook uses CPU to compare 999 and both 1199 checkpoints at 2.8 m/s
 with a five-second hold. It uses 48 trials per checkpoint on each of two
 fresh seeds. A separate diagnostic comparison on seed 2401 measures
 whether failed trials ever entered the stop zone, how long they held,

@@ -21,14 +21,15 @@ PILOT_SEEDS = (EVALUATION_SEED, 9187)
 VALIDATION_SEEDS = (27491, 36187)
 
 
-def evaluate(checkpoint, block_dir, name, profile, *, seed=EVALUATION_SEED, lateral_correction=False):
+def evaluate(checkpoint, block_dir, name, profile, *, seed=EVALUATION_SEED,
+             lateral_correction=False, device="cuda:0"):
     metrics_file = block_dir / f"{name}.json"
     push, noise = profile
     subprocess.run([
         sys.executable, str(PROJECT / "scripts/play.py"),
         "--checkpoint-file", str(checkpoint),
         "--num-envs", str(EPISODES), "--eval-episodes", str(EPISODES),
-        "--device", "cuda:0", "--seed", str(seed), "--disturbances", "True",
+        "--device", device, "--seed", str(seed), "--disturbances", "True",
         "--torso-push-scale", str(push), "--observation-noise-scale", str(noise),
         "--foot-friction-min", os.environ.get("ZLAB_FOOT_FRICTION_MIN", "0.35"),
         "--foot-friction-max", os.environ.get("ZLAB_FOOT_FRICTION_MAX", "1.15"),
@@ -79,6 +80,7 @@ def validate_candidate(checkpoint, control, work_dir, alternative=None):
     seeds = VALIDATION_SEEDS if alternative is None else (46219, 53831)
     report = {
         "seeds": seeds,
+        "device": "cpu",
         "episodes_per_seed": EPISODES,
         "foot_friction": [float(os.environ.get("ZLAB_FOOT_FRICTION_MIN", "0.35")),
                           float(os.environ.get("ZLAB_FOOT_FRICTION_MAX", "1.15"))],
@@ -89,7 +91,7 @@ def validate_candidate(checkpoint, control, work_dir, alternative=None):
     for name, path in checkpoints.items():
         report[name] = {"checkpoint": str(path), "reports": [
             evaluate(path, work_dir, f"{name}-seed-{seed}", PROFILES[0],
-                     seed=seed, lateral_correction=True)
+                     seed=seed, lateral_correction=True, device="cpu")
             for seed in seeds
         ]}
 
@@ -108,7 +110,7 @@ def validate_candidate(checkpoint, control, work_dir, alternative=None):
         for name in ("control", "candidate"):
             report[name]["diagnostic_report"] = evaluate(
                 checkpoints[name], work_dir, f"{name}-diagnostic-{EVALUATION_SEED}",
-                PROFILES[0], seed=EVALUATION_SEED, lateral_correction=True,
+                PROFILES[0], seed=EVALUATION_SEED, lateral_correction=True, device="cpu",
             )
     selected_name = max(qualified)[1] if qualified else "control"
     selected = checkpoints[selected_name]
