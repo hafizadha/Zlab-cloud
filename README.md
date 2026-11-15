@@ -17,23 +17,24 @@ The robot uses its existing position servos to hold the targets.
 
 Open [zlab-training.ipynb](zlab-training.ipynb) in Kaggle, select a T4 GPU,
 and run all cells. The notebook clones `main` and starts from the bundled
-`Zlab_Gym/checkpoints/model_599.pt`. The lateral pilot adds body-frame
+`Zlab_Gym/checkpoints/model_699.pt`. The lateral pilot adds body-frame
 sideways correction capped at 0.35 m/s through the existing lateral
 velocity command. The forward speed cap and braking curve stay the same.
 It also scores block 50 for reference. Compare against the starting model
 in the same report since all checkpoints use the new controller.
 
 The default pilot runs one block of 300 updates at 512 environments per GPU.
-During training, 35% of resets put the ball 2–4.5 m away and give the robot
-0.8–1.6 m/s of initial forward velocity. The other resets keep the 5–11 m
-approach. Every evaluation uses full-length approaches with pushes and noise
+During training, 35% of resets place the ball 1.5–3 m ahead and
+0.35–0.75 m to either side of the nominal starting lane. The robot starts
+with 0.35–0.90 m/s of forward velocity and uses the ball's lateral position
+as its lane target. The remaining resets keep the normal 5–11 m approach. Every evaluation uses full-length approaches with pushes and noise
 disabled. A candidate must earn more clean stops and fewer timeouts on each
 of two 48-trial seeds. The lateral pilot also requires fewer timeouts
 outside the lateral band on each seed. Falls and touches must stay at or below the starting
 checkpoint’s counts on each seed, and lane drift may increase by at most 5 cm.
 The pilot stops after the first block with no qualifying checkpoint.
 
-Read `progress.json` in `/kaggle/working/zlab-robocup-lateral-pilot` for
+Read `progress.json` in `/kaggle/working/zlab-robocup-off-center-pilot` for
 the selected checkpoint and the path to `comparison.json`. The report
 includes the block 50 control, crossed-foot incidence, and overlapping
 timeout counts for gap, lateral offset, yaw, and speed. Start a new work

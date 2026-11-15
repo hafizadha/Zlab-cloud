@@ -216,7 +216,7 @@ class StraightBallSprintCommand(CommandTerm):
         braking_speed = (7.0 * remaining).sqrt().minimum(1.8 * remaining)
         self._command[:, 0] = braking_speed.minimum(self._speed)
 
-        lateral = robot.root_link_pos_w[:, 1] - env.scene.env_origins[:, 1]
+        lateral = robot.root_link_pos_w[:, 1] - self.ball_spawn_xy[:, 1]
         if self.cfg.lateral_correction:
             # Transform pitch-frame correction into the actor's body-frame lateral command.
             yaw = robot.heading_w
@@ -281,16 +281,23 @@ def reset_straight_ball(env, env_ids):
     ball = env.scene["ball"]
     state = ball.data.default_root_state[env_ids].clone()
     distances = torch.empty(len(env_ids), device=env.device).uniform_(*command.cfg.ball_distance_range)
+    state[:, 1] = 0.0
     if command.cfg.finishing_start_fraction > 0.0:
         short = torch.rand(len(env_ids), device=env.device) < command.cfg.finishing_start_fraction
-        distances[short] = torch.empty_like(distances[short]).uniform_(2.0, 4.5)
         short_ids = env_ids[short]
         if short_ids.numel():
             velocities = torch.zeros((short_ids.numel(), 6), device=env.device)
-            velocities[:, 0].uniform_(0.8, 1.6)
+            if command.cfg.lateral_correction:
+                distances[short] = torch.empty_like(distances[short]).uniform_(1.5, 3.0)
+                offset = torch.empty_like(distances[short]).uniform_(0.35, 0.75)
+                left = torch.rand_like(offset) < 0.5
+                state[short, 1] = torch.where(left, offset, -offset)
+                velocities[:, 0].uniform_(0.35, 0.90)
+            else:
+                distances[short] = torch.empty_like(distances[short]).uniform_(2.0, 4.5)
+                velocities[:, 0].uniform_(0.8, 1.6)
             env.scene["robot"].write_root_link_velocity_to_sim(velocities, env_ids=short_ids)
     state[:, 0] = PITCH_START_X + distances
-    state[:, 1] = 0.0
     state[:, :3] += env.scene.env_origins[env_ids]
     state[:, 7:] = 0.0
     command.ball_spawn_xy[env_ids] = state[:, :2]
@@ -320,7 +327,8 @@ def ball_touch_penalty(env):
 
 def lane_tracking_error(env):
     robot = env.scene["robot"].data
-    lateral = robot.root_link_pos_w[:, 1] - env.scene.env_origins[:, 1]
+    lane = env.command_manager.get_term("twist").ball_spawn_xy[:, 1]
+    lateral = robot.root_link_pos_w[:, 1] - lane
     sideways_speed = robot.root_link_lin_vel_w[:, 1]
     heading = wrap_to_pi(robot.heading_w)
     lane_error = (lateral / 0.30).abs()

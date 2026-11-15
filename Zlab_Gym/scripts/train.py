@@ -120,7 +120,9 @@ def run_train(task_id: str, cfg: TrainConfig, log_dir: Path) -> None:
             f"[INFO] {task_id}: ball {command.ball_distance_range} m straight ahead, "
             f"command cap {command.speed_cap:g} m/s, "
             f"torso push scale {cfg.torso_push_scale:g}, "
-            f"observation noise scale {cfg.observation_noise_scale:g}"
+            f"observation noise scale {cfg.observation_noise_scale:g}, "
+            f"finishing starts {command.finishing_start_fraction:.0%}, "
+            f"lateral correction {command.lateral_correction}"
         )
     checkpoint_uploader = HuggingFaceCheckpoints.from_environment(log_dir.name) if rank == 0 else None
 
