@@ -17,10 +17,10 @@ The robot uses its existing position servos to hold the targets.
 
 Open [zlab-training.ipynb](zlab-training.ipynb) in Kaggle, select a T4 GPU,
 and run all cells. The notebook clones `main` and starts from the bundled
-`Zlab_Gym/checkpoints/model_699.pt`. The lateral pilot adds body-frame
+`Zlab_Gym/checkpoints/model_999.pt`. The lateral pilot adds body-frame
 sideways correction capped at 0.35 m/s through the existing lateral
 velocity command. The forward speed cap and braking curve stay the same.
-It also scores block 50 for reference. Compare against the starting model
+It also scores checkpoint 699 for reference. Compare against the starting model
 in the same report since all checkpoints use the new controller.
 
 The default pilot runs one block of 300 updates at 512 environments per GPU.
@@ -34,9 +34,9 @@ outside the lateral band on each seed. Falls and touches must stay at or below t
 checkpoint’s counts on each seed, and lane drift may increase by at most 5 cm.
 The pilot stops after the first block with no qualifying checkpoint.
 
-Read `progress.json` in `/kaggle/working/zlab-robocup-sideways-reward-pilot` for
+Read `progress.json` in `/kaggle/working/zlab-robocup-braking-alignment-pilot` for
 the selected checkpoint and the path to `comparison.json`. The report
-includes the block 50 control, crossed-foot incidence, and overlapping
+includes the checkpoint 699 control, crossed-foot incidence, and overlapping
 timeout counts for gap, lateral offset, yaw, and speed. Start a new work
 directory when changing traction.
 
@@ -48,7 +48,8 @@ directory when changing traction.
 - Lane and heading costs apply across the approach. When off-center, the
   sideways part of the reward favors tracking the correction command. The
   target blends toward zero sideways speed between 25 and 15 cm of lane
-  error. Brake tracking penalizes excess forward speed near the ball.
+  error. Sideways tracking gets more weight near the ball while off-center.
+  Brake tracking penalizes excess forward speed near the ball.
 - A clean 1.5 s hold earns 24 terminal reward units. Ball contact costs 25 and
   other failed trials cost 10. The evaluation does not reward jumping or
   claim that successful stops establish a human running gait. Check stride

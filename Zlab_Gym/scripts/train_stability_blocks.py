@@ -100,7 +100,7 @@ def train_pilot(checkpoint, work_dir, blocks, updates, num_envs, control=None, *
             state["reports"] = evaluate_both(incumbent, directory, "baseline")
             save_state(state_file, state)
         if finishing_pilot and "control_reports" not in state:
-            state["control_reports"] = evaluate_both(control, directory, "block-50-control")
+            state["control_reports"] = evaluate_both(control, directory, "control")
             save_state(state_file, state)
         runtime_env = dict(
             os.environ, ZLAB_PYTHON=sys.executable, ZLAB_LOG_ROOT=str(directory),
@@ -147,7 +147,8 @@ def train_pilot(checkpoint, work_dir, blocks, updates, num_envs, control=None, *
         save_state(directory / "comparison.json", {
             "seeds": PILOT_SEEDS, "baseline": str(incumbent),
             "baseline_reports": state["reports"], "candidates": comparisons,
-            **({"block_50_control_reports": state["control_reports"]} if finishing_pilot else {}),
+            **({"control_checkpoint": str(control), "control_reports": state["control_reports"]}
+               if finishing_pilot else {}),
         })
         state.update(block=block, latest_comparison=str(directory / "comparison.json"))
         if not qualified:

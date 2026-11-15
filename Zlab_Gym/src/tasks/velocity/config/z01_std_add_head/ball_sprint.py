@@ -347,9 +347,16 @@ def lane_tracking_error(env):
     lane_error = (lateral / 0.30).abs()
     # Keep the existing quadratic cost near the lane and grow linearly beyond 0.60 m.
     lane_cost = lane_error.clamp_max(2.0).square() + 4.0 * (lane_error - 2.0).clamp_min(0.0)
+    sideways_scale = 0.40
+    if command.cfg.lateral_correction:
+        gap = command.ball_spawn_xy[:, 0] - robot.root_link_pos_w[:, 0]
+        # Give sideways tracking more weight as forward motion tapers near the ball.
+        near_ball = ((2.20 - gap) / 1.20).clamp(0.0, 1.0)
+        off_center = ((lateral.abs() - 0.15) / 0.10).clamp(0.0, 1.0)
+        sideways_scale = 0.40 - 0.15 * near_ball * off_center
     return (
         lane_cost
-        + (sideways_error / 0.40).square().clamp_max(4.0)
+        + (sideways_error / sideways_scale).square().clamp_max(4.0)
         + (heading / math.radians(15)).square().clamp_max(4.0)
     ) / 3.0
 
