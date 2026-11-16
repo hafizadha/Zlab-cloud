@@ -477,8 +477,10 @@ class RelaxedStopArms(ManagerTermBase):
     def __call__(self, env):
         hold_seconds = env.command_manager.get_term("twist").stop_steps * env.step_dt
         weight = (hold_seconds - 0.5).clamp(0.0, 1.0)
-        # Bound the penalty below the reward for maintaining a valid hold.
-        return weight * (self.pose_error() / 0.60).square().clamp_max(2.0).mean(dim=1)
+        # Keep the penalty bounded while still distinguishing large deviations.
+        squared_error = self.pose_error().square()
+        bounded_error = 2.0 * squared_error / (0.60**2 + squared_error)
+        return weight * bounded_error.mean(dim=1)
 
 
 def stop_lateral_instability(env):
