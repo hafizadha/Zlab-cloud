@@ -422,11 +422,14 @@ def brake_tracking_error(env):
     remaining = command.ball_spawn_xy[:, 0] - robot.root_link_pos_w[:, 0]
     forward = robot.root_link_lin_vel_w[:, 0]
     excess_speed = (forward - command.command[:, 0]).clamp(0.0, 4.4)
-    cost = (remaining < 3.0) * excess_speed.square()
-    if command.cfg.early_braking:
-        near_ball = ((1.5 - remaining) / 0.75).clamp(0.0, 1.0)
-        cost = cost * (1.0 + 2.0 * near_ball)
-    return cost
+    return (remaining < 3.0) * excess_speed.square()
+
+
+def forward_ball_clearance_error(env):
+    command = env.command_manager.get_term("twist")
+    robot = env.scene["robot"].data
+    gap = command.ball_spawn_xy[:, 0] - robot.root_link_pos_w[:, 0]
+    return ((0.55 - gap) / 0.20).clamp(0.0, 2.0).square()
 
 
 def sprint_overspeed(env):

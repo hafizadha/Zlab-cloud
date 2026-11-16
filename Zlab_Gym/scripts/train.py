@@ -26,8 +26,8 @@ import tyro
 from src.tasks.velocity.config.z01_std_add_head import TASK_ID
 from src.tasks.velocity.config.z01_std_add_head.ball_sprint import (
     CHECKPOINT_TASK, DEFAULT_FOOT_FRICTION, STABILITY_SPEED, STABILITY_STAGE,
-    foot_ball_proximity, set_foot_friction, set_observation_noise, set_push_strength,
-    stop_lateral_instability,
+    foot_ball_proximity, forward_ball_clearance_error, set_foot_friction, set_observation_noise,
+    set_push_strength, stop_lateral_instability,
 )
 from typing import Literal
 from pathlib import Path
@@ -97,6 +97,9 @@ def run_train(task_id: str, cfg: TrainConfig, log_dir: Path) -> None:
         cfg.env.rewards["foot_ball_proximity"] = RewardTermCfg(
             func=foot_ball_proximity, weight=-2.0,
             params={"asset_cfg": SceneEntityCfg("robot", geom_names=foot_geom_names)},
+        )
+        cfg.env.rewards["forward_ball_clearance"] = RewardTermCfg(
+            func=forward_ball_clearance_error, weight=-2.0,
         )
     set_push_strength(cfg.env, cfg.torso_push_scale)
     set_observation_noise(cfg.env, cfg.observation_noise_scale)
