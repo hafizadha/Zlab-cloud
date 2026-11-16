@@ -22,7 +22,7 @@ VALIDATION_SEEDS = (27491, 36187)
 
 
 def evaluate(checkpoint, block_dir, name, profile, *, seed=EVALUATION_SEED,
-             lateral_correction=False, early_braking=False):
+             lateral_correction=False, early_braking=False, recovery_starts=False):
     metrics_file = block_dir / f"{name}.json"
     push, noise = profile
     subprocess.run([
@@ -35,6 +35,7 @@ def evaluate(checkpoint, block_dir, name, profile, *, seed=EVALUATION_SEED,
         "--foot-friction-max", os.environ.get("ZLAB_FOOT_FRICTION_MAX", "1.15"),
         "--lateral-correction", str(lateral_correction),
         "--early-braking", str(early_braking),
+        "--recovery-starts", str(recovery_starts),
         "--metrics-file", str(metrics_file),
     ], cwd=PROJECT, check=True)
     return json.loads(metrics_file.read_text())
@@ -128,6 +129,123 @@ def arm_posture_improved(candidate, baseline):
         and candidate["touches"] <= baseline["touches"]
         and candidate["lane_offset_p95_m"] <= baseline["lane_offset_p95_m"] + 0.05
     )
+
+
+def cohort_total(reports, key):
+    return sum(report[key] for report in reports)
+
+
+def arm_error(reports):
+    stops = cohort_total(reports, "stops")
+    if not stops:
+        return float("inf")
+    return sum(report["mean_final_arm_error_rad"] * report["stops"]
+               for report in reports if report["stops"]) / stops
+
+
+def staged_pilot_passes(candidate, baseline, reference, *, arms):
+    outcome_keys = ("stops", "falls", "touches")
+    improvement = False
+    for cohort in (slice(0, 2), slice(2, None)):
+        new, old, control = candidate[cohort], baseline[cohort], reference[cohort]
+        new_stops, new_falls, new_touches = (cohort_total(new, k) for k in outcome_keys)
+        old_stops, old_falls, old_touches = (cohort_total(old, k) for k in outcome_keys)
+        if (new_stops < old_stops
+                or new_falls > min(old_falls, cohort_total(control, "falls"))
+                or new_touches > min(old_touches, cohort_total(control, "touches"))
+                or any(a["lane_offset_p95_m"] > b["lane_offset_p95_m"] + 0.05
+                       for a, b in zip(new, old, strict=True))):
+            return False
+        if arms:
+            new_arms = cohort_total(new, "stops_with_relaxed_arms")
+            old_arms = cohort_total(old, "stops_with_relaxed_arms")
+            if new_arms < old_arms or arm_error(new) >= arm_error(old):
+                return False
+            improvement |= new_arms > old_arms
+        else:
+            improvement |= new_stops > old_stops or new_falls < old_falls or new_touches < old_touches
+    return improvement
+
+
+def train_braking_then_arms(checkpoint, reference, work_dir, updates, num_envs, *, seeds, train_seed):
+    """Run two conditional PPO blocks with separate regular and recovery cohorts."""
+    progress = work_dir / "progress.json"
+    baseline_file = work_dir / "baseline.pt"
+    reference_file = work_dir / "reference.pt"
+    if progress.exists():
+        state = json.loads(progress.read_text())
+        if state["mode"] != "braking_then_arms" or state["seeds"] != list(seeds):
+            raise ValueError("Use a fresh work directory for a different pilot mode or seed set.")
+    else:
+        shutil.copyfile(checkpoint, baseline_file)
+        shutil.copyfile(reference, reference_file)
+        state = {"mode": "braking_then_arms", "checkpoint": str(baseline_file), "block": 0,
+                 "complete": False, "stop_reason": None, "seeds": list(seeds)}
+    reference = reference_file
+    if state["complete"]:
+        print(f"[BALL STABILITY] Pilot already completed. Selected {state['checkpoint']}.", flush=True)
+        return
+
+    def evaluate_suite(path, directory, name):
+        return [evaluate(
+            path, directory, f"{name}-{cohort}-{seed}", PROFILES[0], seed=seed,
+            lateral_correction=True, early_braking=True, recovery_starts=(cohort == "recovery"),
+        ) for seed, cohort in zip(seeds, ("regular", "regular", "recovery"), strict=True)]
+
+    if "reference_reports" not in state:
+        state["reference_reports"] = evaluate_suite(reference, work_dir, "reference")
+        state["reports"] = evaluate_suite(baseline_file, work_dir, "baseline")
+        save_state(progress, state)
+
+    for block in range(state["block"] + 1, 3):
+        arms = block == 2
+        stage = "arms" if arms else "braking"
+        directory = Path(tempfile.mkdtemp(prefix=f"{stage}-", dir=work_dir))
+        incumbent = Path(state["checkpoint"])
+        subprocess.run([
+            str(PROJECT / "train_ball_stability.sh"), str(incumbent), str(updates), str(num_envs),
+        ], cwd=PROJECT, check=True, env=dict(
+            os.environ, ZLAB_PYTHON=sys.executable, ZLAB_LOG_ROOT=str(directory),
+            ZLAB_TRAIN_SEED=str(train_seed + block - 1), ZLAB_TORSO_PUSH_SCALE="0",
+            ZLAB_OBSERVATION_NOISE_SCALE="0", ZLAB_SAVE_INTERVAL="100",
+            ZLAB_LATERAL_CORRECTION="True", ZLAB_EARLY_BRAKING="True",
+            ZLAB_FINISHING_START_FRACTION="0.35", ZLAB_RECOVERY_START_FRACTION="0.20",
+            ZLAB_RELAXED_STOP_ARMS=str(arms),
+        ))
+        candidates = sorted(directory.glob("rsl_rl/*/*/model_*.pt"))
+        if not candidates:
+            raise RuntimeError(f"Training completed without a checkpoint in {directory}")
+        comparisons = []
+        for candidate in candidates:
+            reports = evaluate_suite(candidate, directory, candidate.stem)
+            passed = staged_pilot_passes(reports, state["reports"], state["reference_reports"], arms=arms)
+            comparisons.append({"checkpoint": str(candidate), "reports": reports, "passed": passed})
+        comparison = directory / "comparison.json"
+        save_state(comparison, {
+            "stage": stage, "seeds": seeds, "cohorts": ["regular", "regular", "recovery"],
+            "baseline": str(incumbent), "baseline_reports": state["reports"],
+            "reference": str(reference), "reference_reports": state["reference_reports"],
+            "candidates": comparisons,
+        })
+        qualified = [entry for entry in comparisons if entry["passed"]]
+        state.update(block=block, latest_comparison=str(comparison))
+        if not qualified:
+            if not arms:
+                state.update(checkpoint=str(reference), reports=state["reference_reports"])
+            state.update(stop_reason=f"no_{stage}_improvement", complete=True)
+            save_state(progress, state)
+            print(f"[BALL STABILITY] No {stage} save qualified. Selected {state['checkpoint']}.", flush=True)
+            return
+        selected = max(qualified, key=lambda entry: (
+            cohort_total(entry["reports"], "stops"),
+            -cohort_total(entry["reports"], "falls"),
+            -cohort_total(entry["reports"], "touches"),
+            cohort_total(entry["reports"], "stops_with_relaxed_arms") if arms else 0,
+            -arm_error(entry["reports"]) if arms else 0,
+        ))
+        state.update(checkpoint=selected["checkpoint"], reports=selected["reports"], complete=arms)
+        save_state(progress, state)
+        print(f"[BALL STABILITY] Selected {state['checkpoint']} after {stage}.", flush=True)
 
 
 def train_pilot(checkpoint, work_dir, blocks, updates, num_envs, control=None, *,
@@ -348,6 +466,8 @@ def main():
     parser.add_argument("--pilot-seeds", nargs=2, type=int, default=PILOT_SEEDS,
                         metavar=("FIRST", "SECOND"))
     parser.add_argument("--pilot-train-seed", type=int, default=42)
+    parser.add_argument("--braking-then-arms-reference", type=Path, metavar="CHECKPOINT")
+    parser.add_argument("--recovery-seed", type=int, default=428027)
     parser.add_argument("--lateral-pilot", action="store_true")
     parser.add_argument("--arm-posture-pilot", action="store_true",
                         help="Require more arms-down stops on each seed while preserving stability.")
@@ -378,6 +498,11 @@ def main():
         parser.error("--validate-against cannot be used with --pilot-blocks.")
     if args.validation_alternative is not None and args.validate_against is None:
         parser.error("--validation-alternative requires --validate-against.")
+    if args.braking_then_arms_reference is not None:
+        if args.pilot_blocks is not None or args.validate_against is not None:
+            parser.error("Choose one pilot or validation mode.")
+        if args.recovery_seed < 0 or args.recovery_seed in args.pilot_seeds:
+            parser.error("Use a separate nonnegative recovery seed.")
     work_dir = args.work_dir.expanduser().resolve()
     work_dir.mkdir(parents=True, exist_ok=True)
     with (work_dir / "training.lock").open("a") as lock:
@@ -386,7 +511,12 @@ def main():
         except BlockingIOError:
             parser.error(f"Training is already running in {work_dir}.")
         checkpoint = args.checkpoint.expanduser().resolve(strict=True)
-        if args.validate_against is not None:
+        if args.braking_then_arms_reference is not None:
+            reference = args.braking_then_arms_reference.expanduser().resolve(strict=True)
+            train_braking_then_arms(checkpoint, reference, work_dir, args.updates, args.num_envs,
+                                    seeds=(*args.pilot_seeds, args.recovery_seed),
+                                    train_seed=args.pilot_train_seed)
+        elif args.validate_against is not None:
             control = args.validate_against.expanduser().resolve(strict=True)
             alternative = args.validation_alternative
             if alternative is not None:

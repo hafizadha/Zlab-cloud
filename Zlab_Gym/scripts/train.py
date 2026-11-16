@@ -47,6 +47,8 @@ class TrainConfig:
     checkpoint: Path | None = None
     observation_noise_scale: float = 0.0
     finishing_start_fraction: float = 0.0
+    recovery_start_fraction: float = 0.0
+    relaxed_stop_arms: bool = True
     lateral_correction: bool = False
     early_braking: bool = False
     foot_friction_min: float = DEFAULT_FOOT_FRICTION[0]
@@ -83,8 +85,13 @@ def run_train(task_id: str, cfg: TrainConfig, log_dir: Path) -> None:
         raise ValueError("Torso push and observation noise scales must be between 0 and 1.")
     if not 0.0 <= cfg.finishing_start_fraction <= 1.0:
         raise ValueError("Finishing start fraction must be between 0 and 1.")
+    if not 0.0 <= cfg.recovery_start_fraction <= 1.0 - cfg.finishing_start_fraction:
+        raise ValueError("Recovery and finishing fractions must be nonnegative and sum to at most one.")
     cfg.env.commands["twist"].speed_cap = STABILITY_SPEED
     cfg.env.commands["twist"].finishing_start_fraction = cfg.finishing_start_fraction
+    cfg.env.commands["twist"].recovery_start_fraction = cfg.recovery_start_fraction
+    if not cfg.relaxed_stop_arms:
+        cfg.env.rewards["relaxed_stop_arms"].weight = 0.0
     cfg.env.commands["twist"].lateral_correction = cfg.lateral_correction
     cfg.env.commands["twist"].early_braking = cfg.early_braking
     if cfg.early_braking:
@@ -141,6 +148,8 @@ def run_train(task_id: str, cfg: TrainConfig, log_dir: Path) -> None:
             f"torso push scale {cfg.torso_push_scale:g}, "
             f"observation noise scale {cfg.observation_noise_scale:g}, "
             f"finishing starts {command.finishing_start_fraction:.0%}, "
+            f"recovery starts {command.recovery_start_fraction:.0%}, "
+            f"arm posture reward {cfg.relaxed_stop_arms}, "
             f"lateral correction {command.lateral_correction}, "
             f"early braking {command.early_braking}"
         )

@@ -192,6 +192,7 @@ class StraightBallSprintCommandCfg(CommandTermCfg):
     speed_cap: float = STABILITY_SPEED
     ball_distance_range: tuple[float, float] = (5.0, 11.0)
     finishing_start_fraction: float = 0.0
+    recovery_start_fraction: float = 0.0
     lateral_correction: bool = False
     early_braking: bool = False
 
@@ -295,8 +296,24 @@ def reset_straight_ball(env, env_ids):
     state = ball.data.default_root_state[env_ids].clone()
     distances = torch.empty(len(env_ids), device=env.device).uniform_(*command.cfg.ball_distance_range)
     state[:, 1] = 0.0
+    recovery_fraction = command.cfg.recovery_start_fraction
+    if recovery_fraction > 0.0:
+        draw = torch.rand(len(env_ids), device=env.device)
+        recovery = draw < recovery_fraction
+        # Sample around the 7.12 m approach where v30 checkpoint 1799 fell locally.
+        distances[recovery] = torch.empty_like(distances[recovery]).uniform_(6.70, 7.55)
+        recovery_ids = env_ids[recovery]
+        if recovery_ids.numel():
+            env_mdp.reset_root_state_uniform(
+                env, recovery_ids,
+                pose_range={"y": (-0.11, -0.025), "roll": (0.0, 0.03),
+                            "pitch": (-0.03, 0.0), "yaw": (0.025, 0.065)},
+                velocity_range={"x": (-0.08, 0.08), "y": (-0.08, 0.08)},
+            )
     if command.cfg.finishing_start_fraction > 0.0:
-        short = torch.rand(len(env_ids), device=env.device) < command.cfg.finishing_start_fraction
+        if recovery_fraction == 0.0:
+            draw = torch.rand(len(env_ids), device=env.device)
+        short = (draw >= recovery_fraction) & (draw < recovery_fraction + command.cfg.finishing_start_fraction)
         short_rows = short.nonzero(as_tuple=True)[0]
         short_ids = env_ids[short_rows]
         if short_ids.numel():

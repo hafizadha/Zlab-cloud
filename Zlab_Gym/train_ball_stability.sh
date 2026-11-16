@@ -41,6 +41,8 @@ exec "${ZLAB_PYTHON:-python}" -u scripts/train.py \
     --lateral-correction="${ZLAB_LATERAL_CORRECTION:-False}" \
     --early-braking="${ZLAB_EARLY_BRAKING:-False}" \
     --finishing-start-fraction="${ZLAB_FINISHING_START_FRACTION:-0}" \
+    --recovery-start-fraction="${ZLAB_RECOVERY_START_FRACTION:-0}" \
+    --relaxed-stop-arms="${ZLAB_RELAXED_STOP_ARMS:-True}" \
     --observation-noise-scale="${ZLAB_OBSERVATION_NOISE_SCALE:-0}" \
     --foot-friction-min="${ZLAB_FOOT_FRICTION_MIN:-0.35}" --foot-friction-max="${ZLAB_FOOT_FRICTION_MAX:-1.15}" \
     --agent.seed="${ZLAB_TRAIN_SEED:-42}" --agent.run-name=ball-stability-2p8
