@@ -26,13 +26,14 @@ centered, the training reward penalizes lateral speed and torso tilt to
 help it finish braking and stand. A proximity penalty starts when the center of a foot collision geometry comes within
 0.28 m of the ball center. About 65% of resets are full approaches,
 25% are rolling off-center approaches, and 10% start close to the ball with forward velocity sampled from -0.18 to
-0.18 m/s and lateral velocity from -0.10 to 0.10 m/s.
+0.18 m/s, lateral velocity from -0.10 to 0.10 m/s, and a lateral ball offset
+from -0.12 to 0.12 m.
 
 The evaluation uses full approaches at 2.8 m/s with the earlier braking
 profile and a continuous five-second hold. It compares each save against
-version 26 checkpoint 1499 on seeds 241013 and 252019 and records 1199 as a reference. Read
+version 26 checkpoint 1499 on seeds 274019 and 285007 and records 1199 as a reference. Read
 `progress.json` and `comparison.json` under
-`/kaggle/working/zlab-robocup-lateral-hold-pilot`. To preview the pilot's
+`/kaggle/working/zlab-robocup-off-center-hold-pilot`. To preview the pilot's
 controller in `scripts/play.py`, pass `--early-braking True`.
 
 ### Rewards for the running approach and stop
