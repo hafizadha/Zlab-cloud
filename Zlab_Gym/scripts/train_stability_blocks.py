@@ -120,12 +120,25 @@ def validate_candidate(checkpoint, control, work_dir, alternative=None):
     print(f"[BALL STABILITY] Selected {selected.name} after fresh-seed validation.", flush=True)
 
 
+def arm_posture_improved(candidate, baseline):
+    return (
+        candidate["stops_with_relaxed_arms"] > baseline["stops_with_relaxed_arms"]
+        and candidate["stops"] >= baseline["stops"]
+        and candidate["falls"] <= baseline["falls"]
+        and candidate["touches"] <= baseline["touches"]
+        and candidate["lane_offset_p95_m"] <= baseline["lane_offset_p95_m"] + 0.05
+    )
+
+
 def train_pilot(checkpoint, work_dir, blocks, updates, num_envs, control=None, *,
-                lateral_pilot=False, seeds=PILOT_SEEDS, train_seed=42, early_braking=False):
+                lateral_pilot=False, seeds=PILOT_SEEDS, train_seed=42, early_braking=False,
+                arm_posture_pilot=False):
     """Evaluate every save and stop after the first block without a better policy."""
     state_file = work_dir / "progress.json"
     finishing_pilot = control is not None
     mode = "lateral" if lateral_pilot else "finishing" if finishing_pilot else "pilot"
+    if arm_posture_pilot:
+        mode = "arm_posture"
     friction = [os.environ.get("ZLAB_FOOT_FRICTION_MIN", "0.35"),
                 os.environ.get("ZLAB_FOOT_FRICTION_MAX", "1.15")]
     if state_file.exists():
@@ -190,7 +203,8 @@ def train_pilot(checkpoint, work_dir, blocks, updates, num_envs, control=None, *
         comparisons = []
         for candidate in candidates:
             reports = evaluate_both(candidate, directory, candidate.stem)
-            improved = all(
+            paired = zip(state["reports"], reports, strict=True)
+            improved = all(arm_posture_improved(new, old) for old, new in paired) if arm_posture_pilot else all(
                 new["stops"] > old["stops"]
                 and new["lane_offset_p95_m"] <= old["lane_offset_p95_m"] + (
                     0.05 if finishing_pilot else -0.05
@@ -202,7 +216,7 @@ def train_pilot(checkpoint, work_dir, blocks, updates, num_envs, control=None, *
                 )
                 and new["falls"] <= old["falls"]
                 and new["touches"] <= old["touches"]
-                for old, new in zip(state["reports"], reports, strict=True)
+                for old, new in paired
             )
             comparisons.append({"checkpoint": str(candidate), "reports": reports,
                                 "improved_on_both_seeds": improved})
@@ -228,6 +242,7 @@ def train_pilot(checkpoint, work_dir, blocks, updates, num_envs, control=None, *
 
         selected, reports = max(qualified, key=lambda entry: (
             sum(report["stops"] for report in entry[1]),
+            sum(report["stops_with_relaxed_arms"] for report in entry[1]) if arm_posture_pilot else 0,
             -sum(report["lane_offset_p95_m"] for report in entry[1]),
         ))
         state.update(checkpoint=str(selected), reports=reports, stop_reason=None)
@@ -334,6 +349,8 @@ def main():
                         metavar=("FIRST", "SECOND"))
     parser.add_argument("--pilot-train-seed", type=int, default=42)
     parser.add_argument("--lateral-pilot", action="store_true")
+    parser.add_argument("--arm-posture-pilot", action="store_true",
+                        help="Require more arms-down stops on each seed while preserving stability.")
     parser.add_argument("--early-braking", action="store_true",
                         help="Use earlier braking and train lateral stability during the stop.")
     parser.add_argument("--finishing-control", type=Path, metavar="CHECKPOINT",
@@ -353,6 +370,8 @@ def main():
         parser.error("--finishing-control requires --pilot-blocks.")
     if args.lateral_pilot and args.finishing_control is None:
         parser.error("--lateral-pilot requires --finishing-control.")
+    if args.arm_posture_pilot and (args.pilot_blocks is None or not args.lateral_pilot):
+        parser.error("--arm-posture-pilot requires --pilot-blocks and --lateral-pilot.")
     if args.early_braking and args.pilot_blocks is None:
         parser.error("--early-braking requires --pilot-blocks.")
     if args.validate_against is not None and args.pilot_blocks is not None:
@@ -381,7 +400,8 @@ def main():
                 control = control.expanduser().resolve(strict=True)
             train_pilot(checkpoint, work_dir, args.pilot_blocks, args.updates, args.num_envs,
                         control, lateral_pilot=args.lateral_pilot, seeds=args.pilot_seeds,
-                        train_seed=args.pilot_train_seed, early_braking=args.early_braking)
+                        train_seed=args.pilot_train_seed, early_braking=args.early_braking,
+                        arm_posture_pilot=args.arm_posture_pilot)
 
 
 if __name__ == "__main__":
