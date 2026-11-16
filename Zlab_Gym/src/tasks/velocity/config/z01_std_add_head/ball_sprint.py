@@ -12,6 +12,7 @@ from mjlab.entity import EntityCfg
 from mjlab.envs import mdp as env_mdp
 from mjlab.managers.command_manager import CommandTerm, CommandTermCfg
 from mjlab.managers.event_manager import EventTermCfg
+from mjlab.managers.manager_base import ManagerTermBase
 from mjlab.managers.reward_manager import RewardTermCfg
 from mjlab.managers.scene_entity_config import SceneEntityCfg
 from mjlab.managers.termination_manager import TerminationTermCfg
@@ -37,6 +38,16 @@ HELD_JOINTS = r"(?:head_.*|(?:left|right)_wrist_.*)"
 MOVING_JOINTS = rf"(?!{HELD_JOINTS}$).*"
 STOP_HEADING_RAD = math.radians(12)
 STOP_HOLD_SECONDS = 5.0
+STANDING_ARM_POSE = {
+    "left_shoulder_pitch": 0.0,
+    "left_shoulder_roll": 0.20,
+    "left_shoulder_yaw": 0.0,
+    "left_elbow": -0.12,
+    "right_shoulder_pitch": 0.0,
+    "right_shoulder_roll": -0.20,
+    "right_shoulder_yaw": 0.0,
+    "right_elbow": -0.12,
+}
 
 
 def apply_walking_profile(cfg):
@@ -451,6 +462,25 @@ def valid_stop_hold(env):
     return (command.stop_steps > 0).float()
 
 
+class RelaxedStopArms(ManagerTermBase):
+    """Encourage arms at the sides once the actor has settled into the hold."""
+
+    def __init__(self, cfg, env):
+        super().__init__(env)
+        robot = env.scene["robot"]
+        self._joint_ids, _ = robot.find_joints(tuple(STANDING_ARM_POSE), preserve_order=True)
+        self._target = torch.tensor(list(STANDING_ARM_POSE.values()), device=env.device)
+
+    def pose_error(self):
+        return self._env.scene["robot"].data.joint_pos[:, self._joint_ids] - self._target
+
+    def __call__(self, env):
+        hold_seconds = env.command_manager.get_term("twist").stop_steps * env.step_dt
+        weight = (hold_seconds - 0.5).clamp(0.0, 1.0)
+        # Bound the penalty below the reward for maintaining a valid hold.
+        return weight * (self.pose_error() / 0.60).square().clamp_max(2.0).mean(dim=1)
+
+
 def stop_lateral_instability(env):
     command = env.command_manager.get_term("twist")
     robot = env.scene["robot"].data
@@ -562,6 +592,7 @@ def ball_approach_env_cfg(play=False):
         sprint_overspeed=RewardTermCfg(func=sprint_overspeed, weight=-2.0),
         backward_drift_near_ball=RewardTermCfg(func=backward_drift_near_ball, weight=-3.0),
         valid_stop_hold=RewardTermCfg(func=valid_stop_hold, weight=2.0),
+        relaxed_stop_arms=RewardTermCfg(func=RelaxedStopArms, weight=-0.75),
         lane_tracking=RewardTermCfg(func=lane_tracking_error, weight=-2.0),
         ball_touch=RewardTermCfg(func=ball_touch_penalty, weight=-25.0 * terminal_scale),
         failed_attempt=RewardTermCfg(func=failed_attempt, weight=-10.0 * terminal_scale),
