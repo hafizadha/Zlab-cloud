@@ -2,6 +2,7 @@
 
 import json
 import math
+import os
 import re
 from dataclasses import dataclass, replace
 from pathlib import Path
@@ -91,6 +92,11 @@ class BallSprintOnPolicyRunner(VelocityOnPolicyRunner):
         self._checkpoint_uploader = checkpoint_uploader
         # Keep the walking actor's input scale during PPO and checkpoint resume.
         self.alg.get_policy().obs_normalizer.until = 0
+        motion_clip = os.environ.get("ZLAB_AMP_CLIP")
+        if motion_clip:
+            from scripts.amp_prior import MotionPriorPPO
+            self.alg = MotionPriorPPO(self.alg, self.env, motion_clip,
+                                      weight=float(os.environ.get("ZLAB_AMP_WEIGHT", "0.2")))
 
     def save(self, path: str, infos=None):
         super().save(path, {**(infos or {}), "task": CHECKPOINT_TASK, "stage": STABILITY_STAGE})

@@ -187,7 +187,8 @@ def run_train(task_id: str, cfg: TrainConfig, log_dir: Path) -> None:
     runner.add_git_repo_to_log(__file__)
     # Warm-start the actor for the new reward/actuator setup. Refit the critic
     # from scratch so old sprint returns and optimizer moments do not carry over.
-    runner.alg.load(state, {"actor": True, "critic": continuing, "optimizer": continuing}, strict=True)
+    resume_returns = continuing and (not os.environ.get("ZLAB_AMP_CLIP") or "motion_prior" in state)
+    runner.alg.load(state, {"actor": True, "critic": resume_returns, "optimizer": resume_returns}, strict=True)
     if continuing:
         runner.current_learning_iteration = state["iter"] + 1
         env.unwrapped.common_step_counter = info.get("env_state", {}).get("common_step_counter", 0)
