@@ -11,10 +11,11 @@ from torch import nn
 class MotionPriorPPO:
     """Delegate PPO and learn a discriminator from genuine motion transitions."""
 
-    def __init__(self, ppo, env, clip, weight=0.2):
+    def __init__(self, ppo, env, clip, weight=0.2, reset_prior=False):
         self.ppo = ppo
         self.env = env.unwrapped
         self.weight = weight
+        self.reset_prior = reset_prior
         self.robot = self.env.scene["robot"]
         self.joint_ids, names = self.robot.find_joints(
             (r"(?!head_.*|.*_wrist_.*).*",), preserve_order=True
@@ -28,6 +29,9 @@ class MotionPriorPPO:
             canonical = json.loads(profile.read_text())["joint_names"]
             columns = [canonical.index(name) for name in names]
             features = np.concatenate((motion["joint_pos"][:, columns], motion["joint_vel"][:, columns]), axis=1)
+            lengths = motion["clip_lengths"].tolist() if "clip_lengths" in motion else [len(features)]
+            if sum(lengths) != len(features) or any(length < 2 for length in lengths):
+                raise ValueError("Invalid demonstration clip boundaries.")
         if len(features) < 100 or not np.isfinite(features).all():
             raise ValueError("Need at least 100 finite demonstration frames.")
         self.identity = hashlib.sha256(Path(clip).read_bytes()).hexdigest()
@@ -35,7 +39,13 @@ class MotionPriorPPO:
         demo = torch.tensor(features, device=device, dtype=torch.float32)
         self.mean = demo.mean(0)
         self.std = demo.std(0).clamp_min(0.1)
-        self.demo = torch.cat((demo[:-1], demo[1:]), dim=1)
+        pairs = []
+        offset = 0
+        for length in lengths:
+            segment = demo[offset:offset + length]
+            pairs.append(torch.cat((segment[:-1], segment[1:]), dim=1))
+            offset += length
+        self.demo = torch.cat(pairs)
         dim = self.demo.shape[1]
         self.discriminator = nn.Sequential(nn.Linear(dim, 256), nn.ELU(),
                                            nn.Linear(256, 128), nn.ELU(), nn.Linear(128, 1)).to(device)
@@ -110,7 +120,7 @@ class MotionPriorPPO:
     def load(self, state, load_cfg, strict=True):
         result = self.ppo.load(state, load_cfg, strict)
         prior = state.get("motion_prior")
-        if prior:
+        if prior and not self.reset_prior:
             if prior["reference_sha256"] != self.identity or prior["weight"] != self.weight:
                 raise ValueError("AMP reference or reward weight changed on resume.")
             self.discriminator.load_state_dict(prior["discriminator"])

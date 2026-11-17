@@ -146,6 +146,9 @@ def evaluate_ball_sprint(env: RslRlVecEnvWrapper, policy: Callable, episodes: in
     longest_hold = torch.zeros_like(remaining)
     relaxed_arm_steps = torch.zeros_like(remaining)
     final_arm_error = torch.zeros_like(peak_speed)
+    stance_slip_distance = torch.zeros_like(peak_speed)
+    stance_foot_seconds = torch.zeros_like(peak_speed)
+    minimum_foot_separation = torch.full_like(peak_speed, float("inf"))
     backward_after_entry = torch.zeros_like(crossed_feet)
     results = []
     while remaining.any():
@@ -164,6 +167,11 @@ def evaluate_ball_sprint(env: RslRlVecEnvWrapper, policy: Callable, episodes: in
         heading_error = torch.maximum(heading_error, wrap_to_pi(robot.heading_w).abs())
         left, right = robot.site_pos_w[:, foot_sites, :2].unbind(dim=1)
         delta = left - right
+        minimum_foot_separation = torch.minimum(minimum_foot_separation, delta.norm(dim=1))
+        contact = simulation.scene["feet_ground_contact"].data.found > 0
+        foot_speed = robot.site_lin_vel_w[:, foot_sites, :2].norm(dim=2)
+        stance_slip_distance += (foot_speed * contact).sum(dim=1) * simulation.step_dt
+        stance_foot_seconds += contact.sum(dim=1) * simulation.step_dt
         yaw = robot.heading_w
         crossed_feet |= delta[:, 1] * yaw.cos() - delta[:, 0] * yaw.sin() < 0.0
         _, _, done, _ = env.step(policy(env.get_observations()))
@@ -179,6 +187,8 @@ def evaluate_ball_sprint(env: RslRlVecEnvWrapper, policy: Callable, episodes: in
             longest_hold * simulation.step_dt, backward_after_entry,
             relaxed_arm_steps >= relaxed_arm_steps_required,
             final_arm_error / relaxed_arm_steps_required,
+            stance_slip_distance / stance_foot_seconds.clamp_min(simulation.step_dt),
+            minimum_foot_separation,
             *(command.stop_errors & timed_out[:, None]).unbind(dim=1),
         ), dim=1)[finished])
         remaining -= finished.long()
@@ -189,10 +199,14 @@ def evaluate_ball_sprint(env: RslRlVecEnvWrapper, policy: Callable, episodes: in
         longest_hold.masked_fill_(finished, 0)
         relaxed_arm_steps.masked_fill_(finished, 0)
         final_arm_error.masked_fill_(finished, 0.0)
+        stance_slip_distance.masked_fill_(finished, 0.0)
+        stance_foot_seconds.masked_fill_(finished, 0.0)
+        minimum_foot_separation.masked_fill_(finished, float("inf"))
         backward_after_entry.masked_fill_(finished, False)
 
     (distance, stops, falls, touches, misses, timeouts, peak, lateral, heading, duration, crossed,
      hold_seconds, reversed_after_entry, relaxed_arms_at_finish, arm_error_at_finish,
+     stance_slip_speed, foot_separation,
      timeout_gap, timeout_lateral, timeout_yaw, timeout_speed) = (
         torch.cat(results).T.cpu()
     )
@@ -203,6 +217,9 @@ def evaluate_ball_sprint(env: RslRlVecEnvWrapper, policy: Callable, episodes: in
         "stops": int(stops.sum()),
         "stops_with_relaxed_arms": int((stops.bool() & relaxed_arms_at_finish.bool()).sum()),
         "mean_final_arm_error_rad": arm_error_at_finish[stops.bool()].mean().item() if stops.any() else None,
+        "mean_stance_slip_speed_mps": stance_slip_speed.mean().item(),
+        "foot_site_separation_p05_m": foot_separation.quantile(0.05).item(),
+        "mean_peak_forward_speed_mps": peak.mean().item(),
         "falls": int(falls.sum()),
         "touches": int(touches.sum()),
         "misses": int(misses.sum()),

@@ -96,7 +96,8 @@ class BallSprintOnPolicyRunner(VelocityOnPolicyRunner):
         if motion_clip:
             from scripts.amp_prior import MotionPriorPPO
             self.alg = MotionPriorPPO(self.alg, self.env, motion_clip,
-                                      weight=float(os.environ.get("ZLAB_AMP_WEIGHT", "0.2")))
+                                      weight=float(os.environ.get("ZLAB_AMP_WEIGHT", "0.2")),
+                                      reset_prior=os.environ.get("ZLAB_AMP_RESET_PRIOR") == "1")
 
     def save(self, path: str, infos=None):
         super().save(path, {**(infos or {}), "task": CHECKPOINT_TASK, "stage": STABILITY_STAGE})
