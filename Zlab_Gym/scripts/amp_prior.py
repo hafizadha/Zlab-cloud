@@ -29,6 +29,13 @@ class MotionPriorPPO:
             canonical = json.loads(profile.read_text())["joint_names"]
             columns = [canonical.index(name) for name in names]
             features = np.concatenate((motion["joint_pos"][:, columns], motion["joint_vel"][:, columns]), axis=1)
+            self.extended_features = "body_features" in motion
+            if self.extended_features:
+                if str(motion["body_feature_schema"].item()) != "root-gravity-feet-v1":
+                    raise ValueError("Unknown AMP body feature schema.")
+                if motion["body_features"].shape != (len(features), 21):
+                    raise ValueError("Expected 21 root and foot reference features per frame.")
+                features = np.concatenate((features, motion["body_features"]), axis=1)
             lengths = motion["clip_lengths"].tolist() if "clip_lengths" in motion else [len(features)]
             if sum(lengths) != len(features) or any(length < 2 for length in lengths):
                 raise ValueError("Invalid demonstration clip boundaries.")
@@ -56,13 +63,25 @@ class MotionPriorPPO:
         self.style_sum = 0.0
         self.style_count = 0
         self.updates = 0
+        if self.extended_features:
+            self.foot_ids, _ = self.robot.find_sites(("left_foot", "right_foot"), preserve_order=True)
 
     def __getattr__(self, name):
         return getattr(self.ppo, name)
 
     def features(self):
         data = self.robot.data
-        return torch.cat((data.joint_pos[:, self.joint_ids], data.joint_vel[:, self.joint_ids]), dim=1)
+        joints = (data.joint_pos[:, self.joint_ids], data.joint_vel[:, self.joint_ids])
+        if not self.extended_features:
+            return torch.cat(joints, dim=1)
+        from mjlab.utils.lab_api.math import quat_apply_inverse
+        quaternion = data.root_link_quat_w[:, None, :].expand(-1, 2, -1)
+        foot_position = data.site_pos_w[:, self.foot_ids] - data.root_link_pos_w[:, None, :]
+        foot_velocity = data.site_lin_vel_w[:, self.foot_ids]
+        return torch.cat((*joints, data.root_link_lin_vel_b, data.root_link_ang_vel_b,
+                          data.projected_gravity_b,
+                          quat_apply_inverse(quaternion, foot_position).flatten(1),
+                          quat_apply_inverse(quaternion, foot_velocity).flatten(1)), dim=1)
 
     def normalize(self, pair):
         mean = self.mean.repeat(2)
