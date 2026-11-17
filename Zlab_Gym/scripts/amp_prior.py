@@ -52,6 +52,9 @@ class MotionPriorPPO:
         self.optimizer = torch.optim.Adam(self.discriminator.parameters(), lr=1e-4)
         self.samples = []
         self.previous = None
+        self.running = None
+        self.style_sum = 0.0
+        self.style_count = 0
         self.updates = 0
 
     def __getattr__(self, name):
@@ -68,25 +71,32 @@ class MotionPriorPPO:
 
     def act(self, obs):
         self.previous = self.features().clone()
+        command = self.env.command_manager.get_command("twist")[:, 0]
+        forward_speed = self.robot.data.root_link_lin_vel_w[:, 0]
+        # Reference clips cover established running, starting at 1.5 m/s.
+        self.running = (command >= 1.5) & (forward_speed >= 1.0)
         return self.ppo.act(obs)
 
     def process_env_step(self, obs, rewards, dones, extras):
         current = self.features()
         pair = torch.cat((self.previous, current), dim=1)
         valid = ~dones.bool()
-        # The first dataset covers running. Braking/standing retain task rewards.
-        command = self.env.command_manager.get_command("twist")[:, 0]
-        running = command > 0.5
+        running = self.running
         with torch.no_grad():
             score = self.discriminator(self.normalize(pair)).squeeze(-1)
             style = (1 - 0.25 * (score - 1).square()).clamp_min(0)
             ramp = min(1.0, self.updates / 50)
             bonus = self.weight * ramp * self.env.step_dt * style * valid * running
+            self.style_sum += bonus.sum().item()
+            self.style_count += len(bonus)
         self.samples.append(pair[valid & running].detach())
         self.ppo.process_env_step(obs, rewards + bonus, dones, extras)
 
     def update(self, iteration=0):
         losses = self.ppo.update(iteration)
+        losses["amp_mean_step_bonus"] = self.style_sum / max(1, self.style_count)
+        self.style_sum = 0.0
+        self.style_count = 0
         if self.samples:
             generated = torch.cat(self.samples).clone()
             self.samples.clear()
