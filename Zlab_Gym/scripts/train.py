@@ -27,12 +27,12 @@ from src.tasks.velocity.config.z01_std_add_head import TASK_ID
 from src.tasks.velocity.config.z01_std_add_head.ball_sprint import (
     CHECKPOINT_TASK, DEFAULT_FOOT_FRICTION, STABILITY_SPEED, STABILITY_STAGE,
     foot_ball_proximity, forward_ball_clearance_error, set_foot_friction, set_observation_noise,
-    set_push_strength, stop_lateral_instability,
+    set_push_strength, stop_lateral_instability, amp_gait_env_cfg,
 )
 from typing import Literal
 from pathlib import Path
 from datetime import datetime
-from dataclasses import asdict, dataclass, field
+from dataclasses import asdict, dataclass, field, replace
 import logging
 import math
 
@@ -49,6 +49,7 @@ class TrainConfig:
     finishing_start_fraction: float = 0.0
     recovery_start_fraction: float = 0.0
     relaxed_stop_arms: bool = True
+    amp_gait_stage: bool = False
     lateral_correction: bool = False
     early_braking: bool = False
     foot_friction_min: float = DEFAULT_FOOT_FRICTION[0]
@@ -87,27 +88,34 @@ def run_train(task_id: str, cfg: TrainConfig, log_dir: Path) -> None:
         raise ValueError("Finishing start fraction must be between 0 and 1.")
     if not 0.0 <= cfg.recovery_start_fraction <= 1.0 - cfg.finishing_start_fraction:
         raise ValueError("Recovery and finishing fractions must be nonnegative and sum to at most one.")
-    cfg.env.commands["twist"].speed_cap = STABILITY_SPEED
-    cfg.env.commands["twist"].finishing_start_fraction = cfg.finishing_start_fraction
-    cfg.env.commands["twist"].recovery_start_fraction = cfg.recovery_start_fraction
-    if not cfg.relaxed_stop_arms:
-        cfg.env.rewards["relaxed_stop_arms"].weight = 0.0
-    cfg.env.commands["twist"].lateral_correction = cfg.lateral_correction
-    cfg.env.commands["twist"].early_braking = cfg.early_braking
-    if cfg.early_braking:
-        cfg.env.rewards["stop_lateral_instability"] = RewardTermCfg(
-            func=stop_lateral_instability, weight=-1.5,
-        )
-        # Scale the existing dt-normalized terminal cost from 25 to 40 units.
-        cfg.env.rewards["ball_touch"].weight *= 40.0 / 25.0
-        foot_geom_names = cfg.env.events["foot_friction"].params["asset_cfg"].geom_names
-        cfg.env.rewards["foot_ball_proximity"] = RewardTermCfg(
-            func=foot_ball_proximity, weight=-2.0,
-            params={"asset_cfg": SceneEntityCfg("robot", geom_names=foot_geom_names)},
-        )
-        cfg.env.rewards["forward_ball_clearance"] = RewardTermCfg(
-            func=forward_ball_clearance_error, weight=-2.0,
-        )
+    if cfg.amp_gait_stage:
+        if not os.environ.get("ZLAB_AMP_CLIP"):
+            raise ValueError("The AMP gait stage needs a validated motion reference.")
+        gait_env = amp_gait_env_cfg()
+        gait_env.scene.num_envs = cfg.env.scene.num_envs
+        cfg = replace(cfg, env=gait_env)
+    else:
+        cfg.env.commands["twist"].speed_cap = STABILITY_SPEED
+        cfg.env.commands["twist"].finishing_start_fraction = cfg.finishing_start_fraction
+        cfg.env.commands["twist"].recovery_start_fraction = cfg.recovery_start_fraction
+        if not cfg.relaxed_stop_arms:
+            cfg.env.rewards["relaxed_stop_arms"].weight = 0.0
+        cfg.env.commands["twist"].lateral_correction = cfg.lateral_correction
+        cfg.env.commands["twist"].early_braking = cfg.early_braking
+        if cfg.early_braking:
+            cfg.env.rewards["stop_lateral_instability"] = RewardTermCfg(
+                func=stop_lateral_instability, weight=-1.5,
+            )
+            # Scale the existing dt-normalized terminal cost from 25 to 40 units.
+            cfg.env.rewards["ball_touch"].weight *= 40.0 / 25.0
+            foot_geom_names = cfg.env.events["foot_friction"].params["asset_cfg"].geom_names
+            cfg.env.rewards["foot_ball_proximity"] = RewardTermCfg(
+                func=foot_ball_proximity, weight=-2.0,
+                params={"asset_cfg": SceneEntityCfg("robot", geom_names=foot_geom_names)},
+            )
+            cfg.env.rewards["forward_ball_clearance"] = RewardTermCfg(
+                func=forward_ball_clearance_error, weight=-2.0,
+            )
     set_push_strength(cfg.env, cfg.torso_push_scale)
     set_observation_noise(cfg.env, cfg.observation_noise_scale)
     set_foot_friction(cfg.env, (cfg.foot_friction_min, cfg.foot_friction_max))
@@ -141,18 +149,9 @@ def run_train(task_id: str, cfg: TrainConfig, log_dir: Path) -> None:
 
     if rank == 0:
         print(f"[INFO] Logging experiment in directory: {log_dir}")
-        command = cfg.env.commands["twist"]
-        print(
-            f"[INFO] {task_id}: ball {command.ball_distance_range} m straight ahead, "
-            f"command cap {command.speed_cap:g} m/s, "
-            f"torso push scale {cfg.torso_push_scale:g}, "
-            f"observation noise scale {cfg.observation_noise_scale:g}, "
-            f"finishing starts {command.finishing_start_fraction:.0%}, "
-            f"recovery starts {command.recovery_start_fraction:.0%}, "
-            f"arm posture reward {cfg.relaxed_stop_arms}, "
-            f"lateral correction {command.lateral_correction}, "
-            f"early braking {command.early_braking}"
-        )
+        mode = "amp_gait" if cfg.amp_gait_stage else "ball_stability"
+        print(f"[INFO] Training mode {mode}, command cap {STABILITY_SPEED:g} m/s, "
+              f"torso push {cfg.torso_push_scale:g}, observation noise {cfg.observation_noise_scale:g}")
     checkpoint_uploader = HuggingFaceCheckpoints.from_environment(log_dir.name) if rank == 0 else None
 
     env = ManagerBasedRlEnv(
@@ -189,7 +188,8 @@ def run_train(task_id: str, cfg: TrainConfig, log_dir: Path) -> None:
     # from scratch so old sprint returns and optimizer moments do not carry over.
     # AMP adds a style bonus to the same task. Preserve the task value estimate
     # and PPO optimizer when introducing a fresh discriminator.
-    resume_returns = continuing
+    mode = "amp_gait" if cfg.amp_gait_stage else "ball_stability"
+    resume_returns = continuing and info.get("training_mode", "ball_stability") == mode
     runner.alg.load(state, {"actor": True, "critic": resume_returns, "optimizer": resume_returns}, strict=True)
     if continuing:
         runner.current_learning_iteration = state["iter"] + 1

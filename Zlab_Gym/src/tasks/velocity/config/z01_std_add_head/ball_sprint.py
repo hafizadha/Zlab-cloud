@@ -101,7 +101,10 @@ class BallSprintOnPolicyRunner(VelocityOnPolicyRunner):
                                       teacher_checkpoint=os.environ.get("ZLAB_AMP_BRAKING_TEACHER"))
 
     def save(self, path: str, infos=None):
-        super().save(path, {**(infos or {}), "task": CHECKPOINT_TASK, "stage": STABILITY_STAGE})
+        command = self.env.unwrapped.command_manager.get_term("twist")
+        mode = "ball_stability" if hasattr(command, "stop_steps") else "amp_gait"
+        super().save(path, {**(infos or {}), "task": CHECKPOINT_TASK, "stage": STABILITY_STAGE,
+                            "training_mode": mode})
         if self._checkpoint_uploader is not None:
             self._checkpoint_uploader.submit(Path(path))
 
@@ -173,6 +176,34 @@ def walking_stall(env):
     forward = env.scene["robot"].data.root_link_lin_vel_b[:, 0]
     minimum_speed = (0.5 * command).clamp_min(0.1)
     return (command > 0.1) * (1.0 - forward / minimum_speed).clamp(0.0, 1.0)
+
+
+def outside_robocup_pitch(env):
+    position = env.scene["robot"].data.root_link_pos_w[:, :2] - env.scene.env_origins[:, :2]
+    return (position[:, 0].abs() > PITCH_HALF_LENGTH) | (position[:, 1].abs() > PITCH_HALF_WIDTH)
+
+
+def amp_gait_env_cfg():
+    """Develop running and commanded standing before ball-approach fine-tuning."""
+    cfg = _base_sprint_env_cfg(play=False)
+    command = cfg.commands["twist"]
+    command.ranges.lin_vel_x = (1.5, STABILITY_SPEED)
+    command.ranges.lin_vel_y = (0.0, 0.0)
+    command.ranges.ang_vel_z = (0.0, 0.0)
+    command.ranges.heading = None
+    command.heading_command = False
+    command.rel_standing_envs = 0.25
+    command.resampling_time_range = (6.0, 8.0)
+    cfg.episode_length_s = 12.0
+    cfg.events["foot_friction"].mode = "reset"
+    cfg.events["joint_damping"].params["ranges"] = (0.04, 0.27)
+    cfg.events["reset_base"].params.update(
+        pose_range={"y": (-0.12, 0.12), "roll": (-0.03, 0.03),
+                    "pitch": (-0.03, 0.03), "yaw": (-0.06, 0.06)},
+        velocity_range={"x": (-0.08, 0.08), "y": (-0.08, 0.08)},
+    )
+    cfg.terminations["outside_pitch"] = TerminationTermCfg(func=outside_robocup_pitch)
+    return cfg
 
 
 def _ball_spec() -> mujoco.MjSpec:
