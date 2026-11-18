@@ -183,6 +183,12 @@ def outside_robocup_pitch(env):
     return (position[:, 0].abs() > PITCH_HALF_LENGTH) | (position[:, 1].abs() > PITCH_HALF_WIDTH)
 
 
+def slow_limb_symmetry(env, **kwargs):
+    from src.tasks.velocity.mdp.rewards import limb_symmetry
+    command = env.command_manager.get_command("twist")
+    return limb_symmetry(env, **kwargs) * (command[:, :2].norm(dim=1) < 1.5)
+
+
 def amp_gait_env_cfg():
     """Develop running and commanded standing before ball-approach fine-tuning."""
     cfg = _base_sprint_env_cfg(play=False)
@@ -203,6 +209,10 @@ def amp_gait_env_cfg():
         velocity_range={"x": (-0.08, 0.08), "y": (-0.08, 0.08)},
     )
     cfg.terminations["outside_pitch"] = TerminationTermCfg(func=outside_robocup_pitch)
+    # Human running is asymmetric within a stride. Let the motion prior define
+    # its coordination, retaining the existing symmetry rewards at low speed.
+    for name in ("arm_symmetry", "leg_symmetry"):
+        cfg.rewards[name].func = slow_limb_symmetry
     return cfg
 
 
