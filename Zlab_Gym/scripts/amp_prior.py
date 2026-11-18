@@ -2,6 +2,7 @@
 
 from pathlib import Path
 import hashlib
+import copy
 
 import numpy as np
 import torch
@@ -11,7 +12,7 @@ from torch import nn
 class MotionPriorPPO:
     """Delegate PPO and learn a discriminator from genuine motion transitions."""
 
-    def __init__(self, ppo, env, clip, weight=0.2, reset_prior=False):
+    def __init__(self, ppo, env, clip, weight=0.2, reset_prior=False, teacher_checkpoint=None):
         self.ppo = ppo
         self.env = env.unwrapped
         self.weight = weight
@@ -63,6 +64,16 @@ class MotionPriorPPO:
         self.style_sum = 0.0
         self.style_count = 0
         self.updates = 0
+        self.teacher = None
+        self.teacher_identity = None
+        self.teacher_observations = []
+        if teacher_checkpoint:
+            teacher_state = torch.load(teacher_checkpoint, map_location="cpu", weights_only=True)
+            self.teacher = copy.deepcopy(ppo.get_policy())
+            self.teacher.load_state_dict(teacher_state["actor_state_dict"], strict=True)
+            self.teacher.requires_grad_(False)
+            self.teacher.eval()
+            self.teacher_identity = hashlib.sha256(Path(teacher_checkpoint).read_bytes()).hexdigest()
         if self.extended_features:
             self.foot_ids, _ = self.robot.find_sites(("left_foot", "right_foot"), preserve_order=True)
 
@@ -94,6 +105,8 @@ class MotionPriorPPO:
         forward_speed = self.robot.data.root_link_lin_vel_w[:, 0]
         # Reference clips cover established running, starting at 1.5 m/s.
         self.running = (command >= 1.5) & (forward_speed >= 1.0)
+        if self.teacher is not None and (command < 1.5).any():
+            self.teacher_observations.append(obs[command < 1.5].detach().clone())
         return self.ppo.act(obs)
 
     def process_env_step(self, obs, rewards, dones, extras):
@@ -116,6 +129,21 @@ class MotionPriorPPO:
         losses["amp_mean_step_bonus"] = self.style_sum / max(1, self.style_count)
         self.style_sum = 0.0
         self.style_count = 0
+        if self.teacher_observations:
+            observations = torch.cat(self.teacher_observations, dim=0).clone()
+            self.teacher_observations.clear()
+            for _ in range(4):
+                indices = torch.randint(len(observations), (256,), device=self.ppo.device)
+                batch = observations[indices]
+                with torch.no_grad():
+                    target = self.teacher(batch, stochastic_output=False)
+                prediction = self.ppo.get_policy()(batch, stochastic_output=False)
+                teacher_loss = (prediction - target).square().mean()
+                self.ppo.optimizer.zero_grad()
+                teacher_loss.backward()
+                nn.utils.clip_grad_norm_(self.ppo.get_policy().parameters(), self.ppo.max_grad_norm)
+                self.ppo.optimizer.step()
+            losses["amp_braking_teacher_mse"] = teacher_loss.item()
         if self.samples:
             generated = torch.cat(self.samples).clone()
             self.samples.clear()
@@ -143,7 +171,8 @@ class MotionPriorPPO:
         state = self.ppo.save()
         state["motion_prior"] = dict(discriminator=self.discriminator.state_dict(),
                                      optimizer=self.optimizer.state_dict(), updates=self.updates,
-                                     reference_sha256=self.identity, weight=self.weight)
+                                     reference_sha256=self.identity, weight=self.weight,
+                                     teacher_sha256=self.teacher_identity)
         return state
 
     def load(self, state, load_cfg, strict=True):
@@ -152,6 +181,8 @@ class MotionPriorPPO:
         if prior and not self.reset_prior:
             if prior["reference_sha256"] != self.identity or prior["weight"] != self.weight:
                 raise ValueError("AMP reference or reward weight changed on resume.")
+            if prior.get("teacher_sha256") != self.teacher_identity:
+                raise ValueError("AMP braking teacher changed on resume.")
             self.discriminator.load_state_dict(prior["discriminator"])
             self.optimizer.load_state_dict(prior["optimizer"])
             self.updates = prior["updates"]
