@@ -89,8 +89,6 @@ def run_train(task_id: str, cfg: TrainConfig, log_dir: Path) -> None:
     if not 0.0 <= cfg.recovery_start_fraction <= 1.0 - cfg.finishing_start_fraction:
         raise ValueError("Recovery and finishing fractions must be nonnegative and sum to at most one.")
     if cfg.amp_gait_stage:
-        if not os.environ.get("ZLAB_AMP_CLIP"):
-            raise ValueError("The AMP gait stage needs a validated motion reference.")
         gait_env = amp_gait_env_cfg()
         gait_env.scene.num_envs = cfg.env.scene.num_envs
         cfg = replace(cfg, env=gait_env)
