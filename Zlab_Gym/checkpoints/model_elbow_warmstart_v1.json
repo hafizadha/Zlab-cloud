@@ -1,0 +1,182 @@
+{
+  "checkpoint": "model_elbow_warmstart_v1.pt",
+  "sha256": "7d662671d26b7d7400df18e9060f6836b1fe027bec54d22a9b8ccceccb0b99f6",
+  "role": "Experimental next-training seed; original 1799 retained as fallback. No deployment or hardware validation.",
+  "method": "Bounded supervised fit of two elbow output rows in frozen original MLP features; not additional AMP/PPO updates.",
+  "parent": "model_1799_v30.pt",
+  "parent_sha256": "746827aeb708552d7c1d51a74d1df99a5c6fb9ac7417de6f268dc532814a3753",
+  "reference": "Corrected sprint1/subject2 only; raw/retargeted motion data stays local.",
+  "invariants": {
+    "command_cap_mps": 2.8,
+    "pitch_m": [
+      22,
+      14
+    ],
+    "upright_stop_hold_seconds": 5,
+    "head_wrists_held": true,
+    "unchanged_actor_trunk_normalizer_exploration_and_other_output_rows": true,
+    "critic": "Original critic retained",
+    "optimizer": "Moments reset for future adaptation"
+  },
+  "fit": {
+    "ridge": 0.0001,
+    "stop_weight": 16.0,
+    "heldout_max_slow_drift_rad": 0.024999999999999915,
+    "heldout_mean_running_elbow_bend_rad": 0.061277825339237715,
+    "recorded_max_change_rad": 0.08300652471936118
+  },
+  "ball_evaluation": {
+    "initial": {
+      "seeds": [
+        648113,
+        659119,
+        670129
+      ],
+      "recovery_seed": 670129,
+      "totals": {
+        "elbow-warmstart": {
+          "episodes": 144,
+          "stops": 110,
+          "falls": 0,
+          "touches": 2,
+          "trials_with_crossed_feet": 1
+        },
+        "v26-1499": {
+          "episodes": 144,
+          "stops": 101,
+          "falls": 0,
+          "touches": 3,
+          "trials_with_crossed_feet": 0
+        },
+        "v30-1799": {
+          "episodes": 144,
+          "stops": 110,
+          "falls": 0,
+          "touches": 3,
+          "trials_with_crossed_feet": 1
+        }
+      }
+    },
+    "fresh": {
+      "seeds": [
+        775163,
+        786169,
+        797177
+      ],
+      "recovery_seed": 797177,
+      "totals": {
+        "elbow-warmstart": {
+          "episodes": 144,
+          "stops": 104,
+          "falls": 0,
+          "touches": 6,
+          "trials_with_crossed_feet": 0
+        },
+        "v26-1499": {
+          "episodes": 144,
+          "stops": 100,
+          "falls": 1,
+          "touches": 3,
+          "trials_with_crossed_feet": 1
+        },
+        "v30-1799": {
+          "episodes": 144,
+          "stops": 100,
+          "falls": 2,
+          "touches": 7,
+          "trials_with_crossed_feet": 1
+        }
+      }
+    }
+  },
+  "fresh_gait": [
+    {
+      "label": "original-808181",
+      "seed": 808181,
+      "episodes": 48,
+      "falls": 1,
+      "pitch_boundaries": 27,
+      "crossed_feet": 0,
+      "five_second_standing_holds": 3,
+      "running_velocity_mae_mps": 0.4645713471706258,
+      "stance_slip_speed_mps": 0.2590859472055082,
+      "running_demo_nearest_rms_training_reference": 1.7267329933122466,
+      "standing_arm_error_rad": 0.3989716984711922,
+      "commanded_standing_sample_count": 6238,
+      "running_elbow_mean_rad": [
+        -0.10612533986568451,
+        -0.4233315885066986
+      ],
+      "running_elbow_mean_target_error_rad": 1.6932272200090694,
+      "running_broad_pose_similarity": 0.5057516287763558
+    },
+    {
+      "label": "original-819191",
+      "seed": 819191,
+      "episodes": 48,
+      "falls": 0,
+      "pitch_boundaries": 26,
+      "crossed_feet": 0,
+      "five_second_standing_holds": 3,
+      "running_velocity_mae_mps": 0.4638829850945093,
+      "stance_slip_speed_mps": 0.24273717828766334,
+      "running_demo_nearest_rms_training_reference": 1.7308562487432948,
+      "standing_arm_error_rad": 0.32199595970508854,
+      "commanded_standing_sample_count": 7423,
+      "running_elbow_mean_rad": [
+        -0.10707718133926392,
+        -0.42136380076408386
+      ],
+      "running_elbow_mean_target_error_rad": 1.6937352677386044,
+      "running_broad_pose_similarity": 0.5063313064187531
+    },
+    {
+      "label": "warm-808181",
+      "seed": 808181,
+      "episodes": 48,
+      "falls": 0,
+      "pitch_boundaries": 25,
+      "crossed_feet": 1,
+      "five_second_standing_holds": 3,
+      "running_velocity_mae_mps": 0.4705931745174646,
+      "stance_slip_speed_mps": 0.25831228436107856,
+      "running_demo_nearest_rms_training_reference": 1.7220187230148705,
+      "standing_arm_error_rad": 0.36551987309062123,
+      "commanded_standing_sample_count": 6577,
+      "running_elbow_mean_rad": [
+        -0.12687525153160095,
+        -0.4457407295703888
+      ],
+      "running_elbow_mean_target_error_rad": 1.671647820512235,
+      "running_broad_pose_similarity": 0.5118112157129583
+    },
+    {
+      "label": "warm-819191",
+      "seed": 819191,
+      "episodes": 48,
+      "falls": 0,
+      "pitch_boundaries": 22,
+      "crossed_feet": 0,
+      "five_second_standing_holds": 3,
+      "running_velocity_mae_mps": 0.4737353980242854,
+      "stance_slip_speed_mps": 0.2374897919545582,
+      "running_demo_nearest_rms_training_reference": 1.7271773827894645,
+      "standing_arm_error_rad": 0.29536030761967824,
+      "commanded_standing_sample_count": 7945,
+      "running_elbow_mean_rad": [
+        -0.1260833591222763,
+        -0.4415535628795624
+      ],
+      "running_elbow_mean_target_error_rad": 1.6741370856544018,
+      "running_broad_pose_similarity": 0.5114175824777328
+    }
+  ],
+  "limitations": [
+    "Small posture change, not a complete humanlike running gait.",
+    "Aggregate differences are not statistical proof of superiority.",
+    "Across both gait cohorts: warmstart and cached original each had one fall; warmstart had one crossed-feet trial versus zero for original.",
+    "Seeded rollouts can diverge; exact command trajectories were not held identical.",
+    "Kinematic/PD target bounds apply to calibration observations, not every future state.",
+    "Five-second holds remain incomplete in some trials."
+  ]
+}
