@@ -1,0 +1,61 @@
+{
+  "checkpoint": "model_1899_guarded_amp_v1.pt",
+  "sha256": "18f12c55f75d3441375550343260c1b52819cc071075f3fd76f8935f26e862b9",
+  "role": "Provisional next-training seed: strongest tested guarded AMP candidate; original 1799 and 1499 retained.",
+  "parent": "model_1799_v30.pt",
+  "method": "100 PPO updates, AMP plus pose guidance, leg-output-only adaptation, sampled braking action constraint 0.01rad.",
+  "reference": "Corrected sprint1/subject2 only; licensed motion stays local.",
+  "evaluation": {
+    "episodes_per_policy": 288,
+    "seeds": [
+      948281,
+      959287,
+      970297,
+      981301,
+      992311,
+      1003331
+    ],
+    "candidate": {
+      "stops": 214,
+      "falls": 1,
+      "touches": 11
+    },
+    "original_1799": {
+      "stops": 199,
+      "falls": 1,
+      "touches": 12
+    },
+    "gait": "Very small measured leg-pose changes; no claim of human-like running yet."
+  },
+  "video": {
+    "seed": 648113,
+    "indices": [
+      0,
+      1,
+      2,
+      3
+    ],
+    "outcomes": [
+      "ball_reached",
+      "ball_reached",
+      "missed_ball",
+      "ball_reached"
+    ],
+    "path": "Local amp-local/video-023-guarded-amp/guarded-amp-four-trials.mp4"
+  },
+  "constraints": {
+    "command_cap_mps": 2.8,
+    "pitch_m": [
+      22,
+      14
+    ],
+    "continuous_upright_hold_s": 5,
+    "head_wrists_held": true
+  },
+  "deployment_validated": false,
+  "limitations": [
+    "Small simulation improvement across two cohorts, not a statistical or hardware robustness guarantee.",
+    "The braking bound covers calibration and recent sampled observations, not all possible states.",
+    "AMP whole-body discriminator is sensitive to fixed arm mismatch; next experiment isolates locomotion features."
+  ]
+}
