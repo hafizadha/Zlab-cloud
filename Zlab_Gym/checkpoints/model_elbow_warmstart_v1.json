@@ -1,7 +1,7 @@
 {
   "checkpoint": "model_elbow_warmstart_v1.pt",
   "sha256": "7d662671d26b7d7400df18e9060f6836b1fe027bec54d22a9b8ccceccb0b99f6",
-  "role": "Experimental next-training seed; original 1799 retained as fallback. No deployment or hardware validation.",
+  "role": "Archived experimental prototype; do not use as the next training seed.",
   "method": "Bounded supervised fit of two elbow output rows in frozen original MLP features; not additional AMP/PPO updates.",
   "parent": "model_1799_v30.pt",
   "parent_sha256": "746827aeb708552d7c1d51a74d1df99a5c6fb9ac7417de6f268dc532814a3753",
@@ -23,7 +23,8 @@
     "stop_weight": 16.0,
     "heldout_max_slow_drift_rad": 0.024999999999999915,
     "heldout_mean_running_elbow_bend_rad": 0.061277825339237715,
-    "recorded_max_change_rad": 0.08300652471936118
+    "recorded_max_change_rad": 0.08300652471936118,
+    "limit_status": "Invalid predicted limits; see fit_bound_warning."
   },
   "ball_evaluation": {
     "initial": {
@@ -178,5 +179,74 @@
     "Seeded rollouts can diverge; exact command trajectories were not held identical.",
     "Kinematic/PD target bounds apply to calibration observations, not every future state.",
     "Five-second holds remain incomplete in some trials."
-  ]
+  ],
+  "fit_bound_warning": "The prototype fitter used Module.children(), which deduplicated repeated activation instances. Predicted target-change limits were invalid. Empirical rollout metrics remain valid. A corrected fitter must reconstruct the full actor and check actual exported output bounds before revalidation.",
+  "actual_target_drift_audit": {
+    "old_slow": {
+      "0.5": 0.02802536077797413,
+      "0.95": 0.05641393475234509,
+      "0.99": 0.06291980713605881,
+      "1.0": 0.14853616058826447,
+      "fraction_above_04": 0.33110218652387324,
+      "fraction_above_1": 0.00024790520105111806
+    },
+    "new_slow": {
+      "0.5": 0.03152140974998474,
+      "0.95": 0.05559525303542614,
+      "0.99": 0.06091927006840705,
+      "1.0": 0.0997241735458374,
+      "fraction_above_04": 0.3020796257690548,
+      "fraction_above_1": 0.0
+    },
+    "old_run": {
+      "0.5": 0.03155642934143543,
+      "0.95": 0.1000755801796913,
+      "0.99": 0.11448893889784813,
+      "1.0": 0.13287505507469177,
+      "fraction_above_04": 0.41052761038002705,
+      "fraction_above_1": 0.050178329848727096
+    },
+    "new_run": {
+      "0.5": 0.031217506155371666,
+      "0.95": 0.09740284830331802,
+      "0.99": 0.10981118462979794,
+      "1.0": 0.12809011340141296,
+      "fraction_above_04": 0.4205705009276438,
+      "fraction_above_1": 0.03942486085343228
+    }
+  },
+  "actual_audit": {
+    "old_slow": {
+      "0.5": 0.02802536077797413,
+      "0.95": 0.05641393475234509,
+      "0.99": 0.06291980713605881,
+      "1.0": 0.14853616058826447,
+      "fraction_above_04": 0.33110218652387324,
+      "fraction_above_1": 0.00024790520105111806
+    },
+    "new_slow": {
+      "0.5": 0.03152140974998474,
+      "0.95": 0.05559525303542614,
+      "0.99": 0.06091927006840705,
+      "1.0": 0.0997241735458374,
+      "fraction_above_04": 0.3020796257690548,
+      "fraction_above_1": 0.0
+    },
+    "old_run": {
+      "0.5": 0.03155642934143543,
+      "0.95": 0.1000755801796913,
+      "0.99": 0.11448893889784813,
+      "1.0": 0.13287505507469177,
+      "fraction_above_04": 0.41052761038002705,
+      "fraction_above_1": 0.050178329848727096
+    },
+    "new_run": {
+      "0.5": 0.031217506155371666,
+      "0.95": 0.09740284830331802,
+      "0.99": 0.10981118462979794,
+      "1.0": 0.12809011340141296,
+      "fraction_above_04": 0.4205705009276438,
+      "fraction_above_1": 0.03942486085343228
+    }
+  }
 }

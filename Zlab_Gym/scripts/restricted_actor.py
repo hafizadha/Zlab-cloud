@@ -6,6 +6,18 @@ import torch
 from torch import nn
 
 
+def penultimate_features(actor, observations):
+    """Match Sequential.forward, including repeated activation instances."""
+    layers = list(actor.mlp)
+    if not layers or not isinstance(layers[-1], nn.Linear):
+        raise ValueError("Expected an MLP with a final linear action layer.")
+    features = actor.get_latent(observations)
+    # Module.children() deduplicates shared modules; Sequential iteration does not.
+    for layer in layers[:-1]:
+        features = layer(features)
+    return features
+
+
 class ArmOutputAdapter:
     """Preserve non-arm action functions, including optimizer and normalizer state."""
 
