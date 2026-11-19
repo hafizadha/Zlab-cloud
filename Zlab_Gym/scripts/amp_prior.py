@@ -15,7 +15,7 @@ class MotionPriorPPO:
     def __init__(self, ppo, env, clip, weight=0.2, reset_prior=False, teacher_checkpoint=None,
                  joint_position_std_floor=0.1, pose_guidance_weight=0.0, arm_only=False,
                  leg_only=False, braking_guard_data=None, braking_guard_anchor=None,
-                 braking_guard_budget=0.01):
+                 braking_guard_budget=0.01, feature_mode="full"):
         self.braking_guard = None
         self.braking_guard_config = (braking_guard_data, braking_guard_anchor, braking_guard_budget)
         if bool(braking_guard_data) != bool(braking_guard_anchor):
@@ -41,10 +41,18 @@ class MotionPriorPPO:
             raise ValueError("Pose guidance weight must be finite and nonnegative.")
         self.pose_guidance_weight = float(pose_guidance_weight)
         self.pose_guidance_std = 0.75
+        if feature_mode not in ("full", "locomotion"):
+            raise ValueError("Unknown AMP reference feature mode.")
+        if feature_mode == "locomotion" and arm_only:
+            raise ValueError("Locomotion features cannot guide arm-only adaptation.")
+        self.feature_mode = feature_mode
         self.robot = self.env.scene["robot"]
-        self.joint_ids, names = self.robot.find_joints(
-            (r"(?!head_.*|.*_wrist_.*).*",), preserve_order=True
-        )
+        pattern = (r"(left|right)_(hip_(pitch|roll|yaw)|knee|ankle_(pitch|roll))"
+                   if feature_mode == "locomotion" else r"(?!head_.*|.*_wrist_.*).*")
+        self.joint_ids, names = self.robot.find_joints((pattern,), preserve_order=True)
+        self.reference_joint_names = list(names)
+        if feature_mode == "locomotion" and len(names) != 12:
+            raise ValueError("Locomotion references require exactly twelve leg joints.")
         with np.load(clip, allow_pickle=False) as motion:
             if abs(float(motion["fps"].item()) * self.env.step_dt - 1) > 1e-5:
                 raise ValueError("Reference and control timesteps must match.")
@@ -235,6 +243,8 @@ class MotionPriorPPO:
         state["motion_prior"] = dict(discriminator=self.discriminator.state_dict(),
                                      optimizer=self.optimizer.state_dict(), updates=self.updates,
                                      reference_sha256=self.identity, weight=self.weight,
+                                     feature_mode=self.feature_mode,
+                                     reference_joint_names=self.reference_joint_names,
                                      joint_position_std_floor=self.joint_position_std_floor,
                                      pose_guidance_weight=self.pose_guidance_weight,
                                      pose_guidance_std=self.pose_guidance_std,
@@ -249,6 +259,10 @@ class MotionPriorPPO:
         result = self.ppo.load(state, load_cfg, strict)
         prior = state.get("motion_prior")
         if prior and not self.reset_prior:
+            if prior.get("feature_mode", "full") != self.feature_mode:
+                raise ValueError("AMP reference feature mode changed; explicitly reset the prior.")
+            if prior.get("reference_joint_names", self.reference_joint_names) != self.reference_joint_names:
+                raise ValueError("AMP reference joint order changed.")
             if (prior.get("arm_only", False) != self.arm_only
                     or prior.get("leg_only", False) != self.leg_only):
                 raise ValueError("AMP actor adaptation mode changed; explicitly reset the prior.")
