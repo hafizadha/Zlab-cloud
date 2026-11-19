@@ -13,11 +13,16 @@ class MotionPriorPPO:
     """Delegate PPO and learn a discriminator from genuine motion transitions."""
 
     def __init__(self, ppo, env, clip, weight=0.2, reset_prior=False, teacher_checkpoint=None,
-                 joint_position_std_floor=0.1, pose_guidance_weight=0.0):
+                 joint_position_std_floor=0.1, pose_guidance_weight=0.0, arm_only=False):
         self.ppo = ppo
         self.env = env.unwrapped
         self.weight = weight
         self.reset_prior = reset_prior
+        self.arm_only = arm_only
+        self.arm_adapter = None
+        self.arm_action_names = None
+        if arm_only and teacher_checkpoint:
+            raise ValueError("Arm-only adaptation cannot use the whole-body braking teacher.")
         if not np.isfinite(joint_position_std_floor) or joint_position_std_floor <= 0:
             raise ValueError("Joint position normalization floor must be finite and positive.")
         self.joint_position_std_floor = float(joint_position_std_floor)
@@ -87,6 +92,18 @@ class MotionPriorPPO:
             self.teacher_identity = hashlib.sha256(Path(teacher_checkpoint).read_bytes()).hexdigest()
         if self.extended_features:
             self.foot_ids, _ = self.robot.find_sites(("left_foot", "right_foot"), preserve_order=True)
+        if self.arm_only:
+            self.configure_arm_adapter()
+
+    def configure_arm_adapter(self):
+        from scripts.restricted_actor import ArmOutputAdapter
+        if self.arm_adapter is not None:
+            self.arm_adapter.close()
+        names = self.env.action_manager.get_term("joint_pos").target_names
+        self.arm_action_names = list(names)
+        self.arm_adapter = ArmOutputAdapter(self.ppo.get_policy(), self.ppo.optimizer, names)
+        print("[AMP] Adapting arm outputs only:", [name for name, selected
+              in zip(names, self.arm_adapter.mask.tolist()) if selected], flush=True)
 
     def __getattr__(self, name):
         return getattr(self.ppo, name)
@@ -202,6 +219,8 @@ class MotionPriorPPO:
                                      joint_position_std_floor=self.joint_position_std_floor,
                                      pose_guidance_weight=self.pose_guidance_weight,
                                      pose_guidance_std=self.pose_guidance_std,
+                                     arm_only=self.arm_only,
+                                     arm_action_names=self.arm_action_names,
                                      teacher_sha256=self.teacher_identity)
         return state
 
@@ -209,6 +228,10 @@ class MotionPriorPPO:
         result = self.ppo.load(state, load_cfg, strict)
         prior = state.get("motion_prior")
         if prior and not self.reset_prior:
+            if prior.get("arm_only", False) != self.arm_only:
+                raise ValueError("AMP actor adaptation mode changed; explicitly reset the prior.")
+            if self.arm_only and prior.get("arm_action_names") != self.arm_action_names:
+                raise ValueError("AMP restricted action layout changed.")
             if (prior.get("pose_guidance_weight", 0.0) != self.pose_guidance_weight
                     or (self.pose_guidance_weight and
                         prior.get("pose_guidance_std") != self.pose_guidance_std)):
@@ -222,4 +245,7 @@ class MotionPriorPPO:
             self.discriminator.load_state_dict(prior["discriminator"])
             self.optimizer.load_state_dict(prior["optimizer"])
             self.updates = prior["updates"]
+        if self.arm_only:
+            # Capture protected rows AFTER loading seed/candidate actor weights.
+            self.configure_arm_adapter()
         return result
