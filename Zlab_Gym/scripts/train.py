@@ -28,6 +28,7 @@ from src.tasks.velocity.config.z01_std_add_head.ball_sprint import (
     CHECKPOINT_TASK, DEFAULT_FOOT_FRICTION, STABILITY_SPEED, STABILITY_STAGE,
     foot_ball_proximity, forward_ball_clearance_error, set_foot_friction, set_observation_noise,
     set_push_strength, stop_lateral_instability, amp_gait_env_cfg,
+    slow_limb_symmetry,
 )
 from typing import Literal
 from pathlib import Path
@@ -50,6 +51,7 @@ class TrainConfig:
     recovery_start_fraction: float = 0.0
     relaxed_stop_arms: bool = True
     amp_gait_stage: bool = False
+    running_symmetry_gate: bool = False
     lateral_correction: bool = False
     early_braking: bool = False
     foot_friction_min: float = DEFAULT_FOOT_FRICTION[0]
@@ -94,6 +96,11 @@ def run_train(task_id: str, cfg: TrainConfig, log_dir: Path) -> None:
         cfg = replace(cfg, env=gait_env)
     else:
         cfg.env.commands["twist"].speed_cap = STABILITY_SPEED
+        if cfg.running_symmetry_gate:
+            # Running references need alternating limbs; keep the existing
+            # symmetry objective for walking, braking and standing commands.
+            for name in ("arm_symmetry", "leg_symmetry"):
+                cfg.env.rewards[name].func = slow_limb_symmetry
         cfg.env.commands["twist"].finishing_start_fraction = cfg.finishing_start_fraction
         cfg.env.commands["twist"].recovery_start_fraction = cfg.recovery_start_fraction
         if not cfg.relaxed_stop_arms:
