@@ -98,6 +98,7 @@ class BallSprintOnPolicyRunner(VelocityOnPolicyRunner):
             self.alg = MotionPriorPPO(self.alg, self.env, motion_clip,
                                       weight=float(os.environ.get("ZLAB_AMP_WEIGHT", "0.2")),
                                       reset_prior=os.environ.get("ZLAB_AMP_RESET_PRIOR") == "1",
+                                      joint_position_std_floor=float(os.environ.get("ZLAB_AMP_POSITION_STD_FLOOR", "0.1")),
                                       teacher_checkpoint=os.environ.get("ZLAB_AMP_BRAKING_TEACHER"))
 
     def save(self, path: str, infos=None):

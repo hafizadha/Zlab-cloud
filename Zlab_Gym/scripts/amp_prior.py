@@ -12,11 +12,15 @@ from torch import nn
 class MotionPriorPPO:
     """Delegate PPO and learn a discriminator from genuine motion transitions."""
 
-    def __init__(self, ppo, env, clip, weight=0.2, reset_prior=False, teacher_checkpoint=None):
+    def __init__(self, ppo, env, clip, weight=0.2, reset_prior=False, teacher_checkpoint=None,
+                 joint_position_std_floor=0.1):
         self.ppo = ppo
         self.env = env.unwrapped
         self.weight = weight
         self.reset_prior = reset_prior
+        if not np.isfinite(joint_position_std_floor) or joint_position_std_floor <= 0:
+            raise ValueError("Joint position normalization floor must be finite and positive.")
+        self.joint_position_std_floor = float(joint_position_std_floor)
         self.robot = self.env.scene["robot"]
         self.joint_ids, names = self.robot.find_joints(
             (r"(?!head_.*|.*_wrist_.*).*",), preserve_order=True
@@ -47,6 +51,7 @@ class MotionPriorPPO:
         demo = torch.tensor(features, device=device, dtype=torch.float32)
         self.mean = demo.mean(0)
         self.std = demo.std(0).clamp_min(0.1)
+        self.std[:len(self.joint_ids)].clamp_min_(self.joint_position_std_floor)
         pairs = []
         offset = 0
         for length in lengths:
@@ -172,6 +177,7 @@ class MotionPriorPPO:
         state["motion_prior"] = dict(discriminator=self.discriminator.state_dict(),
                                      optimizer=self.optimizer.state_dict(), updates=self.updates,
                                      reference_sha256=self.identity, weight=self.weight,
+                                     joint_position_std_floor=self.joint_position_std_floor,
                                      teacher_sha256=self.teacher_identity)
         return state
 
@@ -179,6 +185,8 @@ class MotionPriorPPO:
         result = self.ppo.load(state, load_cfg, strict)
         prior = state.get("motion_prior")
         if prior and not self.reset_prior:
+            if prior.get("joint_position_std_floor", 0.1) != self.joint_position_std_floor:
+                raise ValueError("AMP normalization changed; explicitly reset the prior.")
             if prior["reference_sha256"] != self.identity or prior["weight"] != self.weight:
                 raise ValueError("AMP reference or reward weight changed on resume.")
             if prior.get("teacher_sha256") != self.teacher_identity:
