@@ -101,6 +101,7 @@ class BallSprintOnPolicyRunner(VelocityOnPolicyRunner):
                                       joint_position_std_floor=float(os.environ.get("ZLAB_AMP_POSITION_STD_FLOOR", "0.1")),
                                       pose_guidance_weight=float(os.environ.get("ZLAB_AMP_POSE_GUIDANCE_WEIGHT", "0.0")),
                                       arm_only=os.environ.get("ZLAB_AMP_ARM_ONLY") == "1",
+                                      leg_only=os.environ.get("ZLAB_AMP_LEG_ONLY") == "1",
                                       teacher_checkpoint=os.environ.get("ZLAB_AMP_BRAKING_TEACHER"))
 
     def save(self, path: str, infos=None):
@@ -190,6 +191,23 @@ def slow_limb_symmetry(env, **kwargs):
     from src.tasks.velocity.mdp.rewards import limb_symmetry
     command = env.command_manager.get_command("twist")
     return limb_symmetry(env, **kwargs) * (command[:, :2].norm(dim=1) < 1.5)
+
+
+def add_foot_pair_penalty(cfg):
+    """Penalize actual opposite-foot impacts without altering contact physics."""
+    from mjlab.tasks.velocity.mdp import self_collision_cost
+    sensor = ContactSensorCfg(
+        name="foot_pair_collision",
+        primary=ContactMatch(mode="subtree", pattern="left_ankle_roll_link", entity="robot"),
+        secondary=ContactMatch(mode="subtree", pattern="right_ankle_roll_link", entity="robot"),
+        fields=("found", "force"), reduce="maxforce", num_slots=1,
+        history_length=cfg.decimation,
+    )
+    cfg.scene.sensors = (cfg.scene.sensors or ()) + (sensor,)
+    cfg.rewards["foot_pair_collision"] = RewardTermCfg(
+        func=self_collision_cost, weight=-5.0,
+        params={"sensor_name": sensor.name, "force_threshold": 10.0},
+    )
 
 
 def amp_gait_env_cfg():

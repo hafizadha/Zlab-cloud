@@ -1,4 +1,4 @@
-"""Restrict an existing MLP actor to shoulder and elbow output adaptation."""
+"""Restrict selected action outputs without changing the existing MLP layout."""
 
 import re
 
@@ -18,23 +18,23 @@ def penultimate_features(actor, observations):
     return features
 
 
-class ArmOutputAdapter:
-    """Preserve non-arm action functions, including optimizer and normalizer state."""
+class RestrictedOutputAdapter:
+    """Preserve other action functions, optimizer rows and normalizer state."""
 
-    def __init__(self, actor, optimizer, target_names):
+    def __init__(self, actor, optimizer, target_names, joint_pattern, expected_count):
         head = [module for module in actor.mlp.modules()
                 if isinstance(module, nn.Linear)][-1]
         if head.out_features != len(target_names):
-            raise ValueError("Arm adaptation requires the existing joint-action layout.")
+            raise ValueError("Restricted adaptation requires the existing joint-action layout.")
         mask = torch.tensor([
-            bool(re.fullmatch(r"(left|right)_(shoulder_(pitch|roll|yaw)|elbow)",
+            bool(re.fullmatch(joint_pattern,
                               name.split("/")[-1]))
             for name in target_names
         ], device=head.weight.device)
-        if mask.sum().item() != 8:
-            raise ValueError("Expected exactly eight shoulder/elbow action outputs.")
+        if mask.sum().item() != expected_count:
+            raise ValueError(f"Expected exactly {expected_count} selected action outputs.")
         if not hasattr(actor.obs_normalizer, "until"):
-            raise ValueError("Arm adaptation requires a freezable observation normalizer.")
+            raise ValueError("Restricted adaptation requires a freezable observation normalizer.")
         self.mask = mask
         self.saved = {}
         self.handles = []
@@ -64,3 +64,15 @@ class ArmOutputAdapter:
         for handle in self.handles:
             handle.remove()
         self.handles.clear()
+
+
+class ArmOutputAdapter(RestrictedOutputAdapter):
+    def __init__(self, actor, optimizer, target_names):
+        super().__init__(actor, optimizer, target_names,
+                         r"(left|right)_(shoulder_(pitch|roll|yaw)|elbow)", 8)
+
+
+class LegOutputAdapter(RestrictedOutputAdapter):
+    def __init__(self, actor, optimizer, target_names):
+        super().__init__(actor, optimizer, target_names,
+                         r"(left|right)_(hip_(pitch|roll|yaw)|knee|ankle_(pitch|roll))", 12)

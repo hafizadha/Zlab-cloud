@@ -28,7 +28,7 @@ from src.tasks.velocity.config.z01_std_add_head.ball_sprint import (
     CHECKPOINT_TASK, DEFAULT_FOOT_FRICTION, STABILITY_SPEED, STABILITY_STAGE,
     foot_ball_proximity, forward_ball_clearance_error, set_foot_friction, set_observation_noise,
     set_push_strength, stop_lateral_instability, amp_gait_env_cfg,
-    slow_limb_symmetry,
+    slow_limb_symmetry, add_foot_pair_penalty,
 )
 from typing import Literal
 from pathlib import Path
@@ -52,6 +52,7 @@ class TrainConfig:
     relaxed_stop_arms: bool = True
     amp_gait_stage: bool = False
     running_symmetry_gate: bool = False
+    foot_pair_penalty: bool = False
     lateral_correction: bool = False
     early_braking: bool = False
     foot_friction_min: float = DEFAULT_FOOT_FRICTION[0]
@@ -121,6 +122,8 @@ def run_train(task_id: str, cfg: TrainConfig, log_dir: Path) -> None:
             cfg.env.rewards["forward_ball_clearance"] = RewardTermCfg(
                 func=forward_ball_clearance_error, weight=-2.0,
             )
+    if cfg.foot_pair_penalty:
+        add_foot_pair_penalty(cfg.env)
     set_push_strength(cfg.env, cfg.torso_push_scale)
     set_observation_noise(cfg.env, cfg.observation_noise_scale)
     set_foot_friction(cfg.env, (cfg.foot_friction_min, cfg.foot_friction_max))
