@@ -102,7 +102,10 @@ class BallSprintOnPolicyRunner(VelocityOnPolicyRunner):
                                       pose_guidance_weight=float(os.environ.get("ZLAB_AMP_POSE_GUIDANCE_WEIGHT", "0.0")),
                                       arm_only=os.environ.get("ZLAB_AMP_ARM_ONLY") == "1",
                                       leg_only=os.environ.get("ZLAB_AMP_LEG_ONLY") == "1",
-                                      teacher_checkpoint=os.environ.get("ZLAB_AMP_BRAKING_TEACHER"))
+                                      teacher_checkpoint=os.environ.get("ZLAB_AMP_BRAKING_TEACHER"),
+                                      braking_guard_data=os.environ.get("ZLAB_AMP_BRAKING_GUARD_DATA"),
+                                      braking_guard_anchor=os.environ.get("ZLAB_AMP_BRAKING_GUARD_ANCHOR"),
+                                      braking_guard_budget=float(os.environ.get("ZLAB_AMP_BRAKING_GUARD_BUDGET", "0.01")))
 
     def save(self, path: str, infos=None):
         command = self.env.unwrapped.command_manager.get_term("twist")

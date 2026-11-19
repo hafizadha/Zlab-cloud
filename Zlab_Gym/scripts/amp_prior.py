@@ -14,7 +14,14 @@ class MotionPriorPPO:
 
     def __init__(self, ppo, env, clip, weight=0.2, reset_prior=False, teacher_checkpoint=None,
                  joint_position_std_floor=0.1, pose_guidance_weight=0.0, arm_only=False,
-                 leg_only=False):
+                 leg_only=False, braking_guard_data=None, braking_guard_anchor=None,
+                 braking_guard_budget=0.01):
+        self.braking_guard = None
+        self.braking_guard_config = (braking_guard_data, braking_guard_anchor, braking_guard_budget)
+        if bool(braking_guard_data) != bool(braking_guard_anchor):
+            raise ValueError("Braking guard needs both calibration data and anchor.")
+        if braking_guard_data and not leg_only:
+            raise ValueError("Braking guard currently requires leg-only adaptation.")
         self.ppo = ppo
         self.env = env.unwrapped
         self.weight = weight
@@ -149,6 +156,10 @@ class MotionPriorPPO:
         self.running = (command >= 1.5) & (forward_speed >= 1.0)
         if self.teacher is not None and (command < 1.5).any():
             self.teacher_observations.append(obs[command < 1.5].detach().clone())
+        if self.braking_guard_config[0] and self.braking_guard is None:
+            raise RuntimeError("Load an anchor-compatible checkpoint before guarded training.")
+        if self.braking_guard is not None:
+            self.braking_guard.observe(obs, command < 1.5)
         return self.ppo.act(obs)
 
     def process_env_step(self, obs, rewards, dones, extras):
@@ -214,6 +225,8 @@ class MotionPriorPPO:
                     self.optimizer.step()
                 losses.update(amp_discriminator=loss.item(), amp_real_score=real_score.mean().item(),
                               amp_policy_score=fake_score.mean().item())
+        if self.braking_guard is not None:
+            losses.update(self.braking_guard.project())
         self.updates += 1
         return losses
 
@@ -228,7 +241,8 @@ class MotionPriorPPO:
                                      arm_only=self.arm_only,
                                      leg_only=self.leg_only,
                                      arm_action_names=self.arm_action_names,
-                                     teacher_sha256=self.teacher_identity)
+                                     teacher_sha256=self.teacher_identity,
+                                     braking_guard=self.braking_guard.save() if self.braking_guard else None)
         return state
 
     def load(self, state, load_cfg, strict=True):
@@ -256,4 +270,15 @@ class MotionPriorPPO:
         if self.arm_only or self.leg_only:
             # Capture protected rows AFTER loading seed/candidate actor weights.
             self.configure_arm_adapter()
+        guard_state = prior.get("braking_guard") if prior else None
+        if not self.reset_prior and bool(guard_state) != bool(self.braking_guard_config[0]):
+            raise ValueError("Braking guard mode changed; explicitly reset the prior.")
+        if self.braking_guard_config[0]:
+            from scripts.braking_guard import BrakingGuard
+            data, anchor, budget = self.braking_guard_config
+            self.braking_guard = BrakingGuard(self.ppo.get_policy(), self.arm_adapter, data, anchor, budget,
+                                              self.env.action_manager.get_term("joint_pos").scale)
+            if guard_state and not self.reset_prior:
+                self.braking_guard.restore(guard_state)
+            self.braking_guard.project()
         return result

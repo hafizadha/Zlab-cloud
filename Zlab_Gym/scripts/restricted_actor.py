@@ -35,6 +35,7 @@ class RestrictedOutputAdapter:
             raise ValueError(f"Expected exactly {expected_count} selected action outputs.")
         if not hasattr(actor.obs_normalizer, "until"):
             raise ValueError("Restricted adaptation requires a freezable observation normalizer.")
+        self.target_names = list(target_names)
         self.mask = mask
         self.saved = {}
         self.handles = []
