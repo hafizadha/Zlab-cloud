@@ -99,6 +99,7 @@ class BallSprintOnPolicyRunner(VelocityOnPolicyRunner):
                                       weight=float(os.environ.get("ZLAB_AMP_WEIGHT", "0.2")),
                                       reset_prior=os.environ.get("ZLAB_AMP_RESET_PRIOR") == "1",
                                       joint_position_std_floor=float(os.environ.get("ZLAB_AMP_POSITION_STD_FLOOR", "0.1")),
+                                      pose_guidance_weight=float(os.environ.get("ZLAB_AMP_POSE_GUIDANCE_WEIGHT", "0.0")),
                                       teacher_checkpoint=os.environ.get("ZLAB_AMP_BRAKING_TEACHER"))
 
     def save(self, path: str, infos=None):

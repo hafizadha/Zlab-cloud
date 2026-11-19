@@ -13,7 +13,7 @@ class MotionPriorPPO:
     """Delegate PPO and learn a discriminator from genuine motion transitions."""
 
     def __init__(self, ppo, env, clip, weight=0.2, reset_prior=False, teacher_checkpoint=None,
-                 joint_position_std_floor=0.1):
+                 joint_position_std_floor=0.1, pose_guidance_weight=0.0):
         self.ppo = ppo
         self.env = env.unwrapped
         self.weight = weight
@@ -21,6 +21,10 @@ class MotionPriorPPO:
         if not np.isfinite(joint_position_std_floor) or joint_position_std_floor <= 0:
             raise ValueError("Joint position normalization floor must be finite and positive.")
         self.joint_position_std_floor = float(joint_position_std_floor)
+        if not np.isfinite(pose_guidance_weight) or pose_guidance_weight < 0:
+            raise ValueError("Pose guidance weight must be finite and nonnegative.")
+        self.pose_guidance_weight = float(pose_guidance_weight)
+        self.pose_guidance_std = 0.75
         self.robot = self.env.scene["robot"]
         self.joint_ids, names = self.robot.find_joints(
             (r"(?!head_.*|.*_wrist_.*).*",), preserve_order=True
@@ -49,6 +53,7 @@ class MotionPriorPPO:
         self.identity = hashlib.sha256(Path(clip).read_bytes()).hexdigest()
         device = ppo.device
         demo = torch.tensor(features, device=device, dtype=torch.float32)
+        self.pose_reference = demo[:, :len(self.joint_ids)]
         self.mean = demo.mean(0)
         self.std = demo.std(0).clamp_min(0.1)
         self.std[:len(self.joint_ids)].clamp_min_(self.joint_position_std_floor)
@@ -67,6 +72,7 @@ class MotionPriorPPO:
         self.previous = None
         self.running = None
         self.style_sum = 0.0
+        self.pose_sum = 0.0
         self.style_count = 0
         self.updates = 0
         self.teacher = None
@@ -104,6 +110,15 @@ class MotionPriorPPO:
         std = self.std.repeat(2)
         return ((pair - mean) / std).clamp(-10, 10)
 
+    def pose_similarity(self, features):
+        """Broad nearest-pose guidance; AMP still scores temporal transitions."""
+        positions = features[:, :len(self.joint_ids)]
+        distance = torch.cdist(positions, self.pose_reference)
+        error = distance.square().amin(dim=1) / (
+            len(self.joint_ids) * self.pose_guidance_std ** 2
+        )
+        return torch.exp(-error)
+
     def act(self, obs):
         self.previous = self.features().clone()
         command = self.env.command_manager.get_command("twist")[:, 0]
@@ -124,15 +139,22 @@ class MotionPriorPPO:
             style = (1 - 0.25 * (score - 1).square()).clamp_min(0)
             ramp = min(1.0, self.updates / 50)
             bonus = self.weight * ramp * self.env.step_dt * style * valid * running
+            pose_bonus = torch.zeros_like(bonus)
+            if self.pose_guidance_weight:
+                pose_bonus = (self.pose_guidance_weight * ramp * self.env.step_dt
+                              * self.pose_similarity(current) * valid * running)
             self.style_sum += bonus.sum().item()
+            self.pose_sum += pose_bonus.sum().item()
             self.style_count += len(bonus)
         self.samples.append(pair[valid & running].detach())
-        self.ppo.process_env_step(obs, rewards + bonus, dones, extras)
+        self.ppo.process_env_step(obs, rewards + bonus + pose_bonus, dones, extras)
 
     def update(self, iteration=0):
         losses = self.ppo.update(iteration)
         losses["amp_mean_step_bonus"] = self.style_sum / max(1, self.style_count)
+        losses["amp_mean_pose_bonus"] = self.pose_sum / max(1, self.style_count)
         self.style_sum = 0.0
+        self.pose_sum = 0.0
         self.style_count = 0
         if self.teacher_observations:
             observations = torch.cat(self.teacher_observations, dim=0).clone()
@@ -178,6 +200,8 @@ class MotionPriorPPO:
                                      optimizer=self.optimizer.state_dict(), updates=self.updates,
                                      reference_sha256=self.identity, weight=self.weight,
                                      joint_position_std_floor=self.joint_position_std_floor,
+                                     pose_guidance_weight=self.pose_guidance_weight,
+                                     pose_guidance_std=self.pose_guidance_std,
                                      teacher_sha256=self.teacher_identity)
         return state
 
@@ -185,6 +209,10 @@ class MotionPriorPPO:
         result = self.ppo.load(state, load_cfg, strict)
         prior = state.get("motion_prior")
         if prior and not self.reset_prior:
+            if (prior.get("pose_guidance_weight", 0.0) != self.pose_guidance_weight
+                    or (self.pose_guidance_weight and
+                        prior.get("pose_guidance_std") != self.pose_guidance_std)):
+                raise ValueError("AMP pose guidance changed; explicitly reset the prior.")
             if prior.get("joint_position_std_floor", 0.1) != self.joint_position_std_floor:
                 raise ValueError("AMP normalization changed; explicitly reset the prior.")
             if prior["reference_sha256"] != self.identity or prior["weight"] != self.weight:
