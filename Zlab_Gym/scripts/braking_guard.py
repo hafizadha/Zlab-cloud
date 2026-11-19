@@ -15,6 +15,10 @@ class BrakingGuard:
     def __init__(self, actor, adapter, calibration, anchor, budget, action_scale=None):
         if not math.isfinite(budget) or budget <= 0:
             raise ValueError('Braking guard budget must be finite and positive.')
+        # TF32's batch-shape-dependent rounding can invalidate cached features.
+        # Guarded training uses full FP32 matmuls, including the live actor.
+        if actor.mlp[-1].weight.is_cuda:
+            torch.backends.cuda.matmul.allow_tf32 = False
         self.actor, self.mask, self.head = actor, adapter.mask, actor.mlp[-1]
         self.budget = float(budget)
         self.identity = dict(calibration_sha256=hashlib.sha256(Path(calibration).read_bytes()).hexdigest(),
