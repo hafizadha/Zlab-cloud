@@ -57,5 +57,10 @@
     "Small simulation improvement across two cohorts, not a statistical or hardware robustness guarantee.",
     "The braking bound covers calibration and recent sampled observations, not all possible states.",
     "AMP whole-body discriminator is sensitive to fixed arm mismatch; next experiment isolates locomotion features."
-  ]
+  ],
+  "effective_training_optimizer_lrs": {
+    "ppo": 2e-05,
+    "discriminator": 5e-06
+  },
+  "optimizer_wiring_note": "Checkpoint audit confirmed an optimizer alias bug: historical configured PPO LR5e-6 was applied to D, while PPO retained2e-5. Rollout metrics remain real. Source10f9087 separates the optimizers and fixes future LR overrides; this artifact is unchanged."
 }
