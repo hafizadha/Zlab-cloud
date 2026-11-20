@@ -15,7 +15,9 @@ class MotionPriorPPO:
     def __init__(self, ppo, env, clip, weight=0.2, reset_prior=False, teacher_checkpoint=None,
                  joint_position_std_floor=0.1, pose_guidance_weight=0.0, arm_only=False,
                  leg_only=False, braking_guard_data=None, braking_guard_anchor=None,
-                 braking_guard_budget=0.01, feature_mode="full"):
+                 braking_guard_budget=0.01, feature_mode="full",
+                 braking_guard_projection="uniform"):
+        self.braking_guard_projection = braking_guard_projection
         self.braking_guard = None
         self.braking_guard_config = (braking_guard_data, braking_guard_anchor, braking_guard_budget)
         if bool(braking_guard_data) != bool(braking_guard_anchor):
@@ -291,7 +293,8 @@ class MotionPriorPPO:
             from scripts.braking_guard import BrakingGuard
             data, anchor, budget = self.braking_guard_config
             self.braking_guard = BrakingGuard(self.ppo.get_policy(), self.arm_adapter, data, anchor, budget,
-                                              self.env.action_manager.get_term("joint_pos").scale)
+                                              self.env.action_manager.get_term("joint_pos").scale,
+                                              projection_mode=self.braking_guard_projection)
             if guard_state and not self.reset_prior:
                 self.braking_guard.restore(guard_state)
             self.braking_guard.project()
