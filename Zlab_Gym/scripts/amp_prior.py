@@ -93,7 +93,8 @@ class MotionPriorPPO:
         dim = self.demo.shape[1]
         self.discriminator = nn.Sequential(nn.Linear(dim, 256), nn.ELU(),
                                            nn.Linear(256, 128), nn.ELU(), nn.Linear(128, 1)).to(device)
-        self.optimizer = torch.optim.Adam(self.discriminator.parameters(), lr=1e-4)
+        # Keep the PPO optimizer interface delegated through __getattr__.
+        self.discriminator_optimizer = torch.optim.Adam(self.discriminator.parameters(), lr=1e-4)
         self.samples = []
         self.previous = None
         self.running = None
@@ -229,10 +230,10 @@ class MotionPriorPPO:
                     gradient = torch.autograd.grad(real_score.sum(), expert, create_graph=True)[0]
                     loss = ((real_score - 1).square().mean() + (fake_score + 1).square().mean()
                             + 10 * gradient.square().sum(1).mean())
-                    self.optimizer.zero_grad()
+                    self.discriminator_optimizer.zero_grad()
                     loss.backward()
                     nn.utils.clip_grad_norm_(self.discriminator.parameters(), 1)
-                    self.optimizer.step()
+                    self.discriminator_optimizer.step()
                 losses.update(amp_discriminator=loss.item(), amp_real_score=real_score.mean().item(),
                               amp_policy_score=fake_score.mean().item())
         if self.braking_guard is not None:
@@ -243,7 +244,7 @@ class MotionPriorPPO:
     def save(self):
         state = self.ppo.save()
         state["motion_prior"] = dict(discriminator=self.discriminator.state_dict(),
-                                     optimizer=self.optimizer.state_dict(), updates=self.updates,
+                                     optimizer=self.discriminator_optimizer.state_dict(), updates=self.updates,
                                      reference_sha256=self.identity, weight=self.weight,
                                      feature_mode=self.feature_mode,
                                      reference_joint_names=self.reference_joint_names,
@@ -281,7 +282,7 @@ class MotionPriorPPO:
             if prior.get("teacher_sha256") != self.teacher_identity:
                 raise ValueError("AMP braking teacher changed on resume.")
             self.discriminator.load_state_dict(prior["discriminator"])
-            self.optimizer.load_state_dict(prior["optimizer"])
+            self.discriminator_optimizer.load_state_dict(prior["optimizer"])
             self.updates = prior["updates"]
         if self.arm_only or self.leg_only:
             # Capture protected rows AFTER loading seed/candidate actor weights.

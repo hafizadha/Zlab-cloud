@@ -11,7 +11,10 @@ from scripts.amp_prior import MotionPriorPPO
 
 class PPO:
     device='cpu'
-    def save(self):return {}
+    def __init__(self):
+        self.parameter=torch.nn.Parameter(torch.zeros(1))
+        self.optimizer=torch.optim.Adam([self.parameter],lr=2e-5)
+    def save(self):return {'optimizer_state_dict':self.optimizer.state_dict()}
     def load(self,*args):return True
 
 class FeatureModeTest(unittest.TestCase):
@@ -32,6 +35,14 @@ class FeatureModeTest(unittest.TestCase):
             clip=Path(temp)/'synthetic-schema-fixture.npz'
             np.savez(clip,joint_pos=q,joint_vel=v,fps=50.,clip_lengths=[64,64],body_features=np.zeros((128,21),np.float32),body_feature_schema='root-gravity-feet-v1')
             full=MotionPriorPPO(PPO(),env,clip)
+            # This is the runner's real post-load LR override path.
+            self.assertIs(full.optimizer,full.ppo.optimizer)
+            for group in full.optimizer.param_groups:group['lr']=5e-6
+            self.assertEqual(full.ppo.optimizer.param_groups[0]['lr'],5e-6)
+            self.assertEqual(full.discriminator_optimizer.param_groups[0]['lr'],1e-4)
+            rates=full.save()
+            self.assertEqual(rates['optimizer_state_dict']['param_groups'][0]['lr'],5e-6)
+            self.assertEqual(rates['motion_prior']['optimizer']['param_groups'][0]['lr'],1e-4)
             leg=MotionPriorPPO(PPO(),env,clip,feature_mode='locomotion')
             self.assertEqual(leg.demo.shape,(126,90))
             self.assertEqual(full.demo.shape,(126,126))

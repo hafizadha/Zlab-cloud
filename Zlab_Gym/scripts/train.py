@@ -210,6 +210,10 @@ def run_train(task_id: str, cfg: TrainConfig, log_dir: Path) -> None:
             distribution = runner.alg.get_policy().distribution
             distribution.std_param.clamp_(max=math.log(math.expm1(0.12)))
     print(f"[INFO] {'Continued stability training' if continuing else 'Warm-started actor'} from {checkpoint}.")
+    discriminator_optimizer = getattr(runner.alg, "discriminator_optimizer", None)
+    print("[INFO] Effective PPO optimizer LR:", [group["lr"] for group in runner.alg.optimizer.param_groups])
+    if discriminator_optimizer is not None:
+        print("[INFO] Effective discriminator LR:", [group["lr"] for group in discriminator_optimizer.param_groups])
     del state
 
     # Only write config files from rank 0 to avoid race conditions.
