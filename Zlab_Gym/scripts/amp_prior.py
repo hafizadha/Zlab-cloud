@@ -43,17 +43,17 @@ class MotionPriorPPO:
             raise ValueError("Pose guidance weight must be finite and nonnegative.")
         self.pose_guidance_weight = float(pose_guidance_weight)
         self.pose_guidance_std = 0.75
-        if feature_mode not in ("full", "locomotion"):
+        if feature_mode not in ("full", "locomotion", "locomotion_joints"):
             raise ValueError("Unknown AMP reference feature mode.")
-        if feature_mode == "locomotion" and arm_only:
+        if feature_mode.startswith("locomotion") and arm_only:
             raise ValueError("Locomotion features cannot guide arm-only adaptation.")
         self.feature_mode = feature_mode
         self.robot = self.env.scene["robot"]
         pattern = (r"(left|right)_(hip_(pitch|roll|yaw)|knee|ankle_(pitch|roll))"
-                   if feature_mode == "locomotion" else r"(?!head_.*|.*_wrist_.*).*")
+                   if feature_mode.startswith("locomotion") else r"(?!head_.*|.*_wrist_.*).*")
         self.joint_ids, names = self.robot.find_joints((pattern,), preserve_order=True)
         self.reference_joint_names = list(names)
-        if feature_mode == "locomotion" and len(names) != 12:
+        if feature_mode.startswith("locomotion") and len(names) != 12:
             raise ValueError("Locomotion references require exactly twelve leg joints.")
         with np.load(clip, allow_pickle=False) as motion:
             if abs(float(motion["fps"].item()) * self.env.step_dt - 1) > 1e-5:
@@ -64,7 +64,7 @@ class MotionPriorPPO:
             canonical = json.loads(profile.read_text())["joint_names"]
             columns = [canonical.index(name) for name in names]
             features = np.concatenate((motion["joint_pos"][:, columns], motion["joint_vel"][:, columns]), axis=1)
-            self.extended_features = "body_features" in motion
+            self.extended_features = "body_features" in motion and feature_mode != "locomotion_joints"
             if self.extended_features:
                 if str(motion["body_feature_schema"].item()) != "root-gravity-feet-v1":
                     raise ValueError("Unknown AMP body feature schema.")
