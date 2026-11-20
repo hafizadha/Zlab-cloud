@@ -16,7 +16,7 @@ class MotionPriorPPO:
                  joint_position_std_floor=0.1, pose_guidance_weight=0.0, arm_only=False,
                  leg_only=False, braking_guard_data=None, braking_guard_anchor=None,
                  braking_guard_budget=0.01, feature_mode="full",
-                 braking_guard_projection="uniform"):
+                 braking_guard_projection="uniform", pose_guidance_std=0.75):
         self.braking_guard_projection = braking_guard_projection
         self.braking_guard = None
         self.braking_guard_config = (braking_guard_data, braking_guard_anchor, braking_guard_budget)
@@ -42,7 +42,9 @@ class MotionPriorPPO:
         if not np.isfinite(pose_guidance_weight) or pose_guidance_weight < 0:
             raise ValueError("Pose guidance weight must be finite and nonnegative.")
         self.pose_guidance_weight = float(pose_guidance_weight)
-        self.pose_guidance_std = 0.75
+        if not np.isfinite(pose_guidance_std) or pose_guidance_std <= 0:
+            raise ValueError("Pose guidance standard deviation must be finite and positive.")
+        self.pose_guidance_std = float(pose_guidance_std)
         if feature_mode not in ("full", "locomotion", "locomotion_joints"):
             raise ValueError("Unknown AMP reference feature mode.")
         if feature_mode.startswith("locomotion") and arm_only:

@@ -61,6 +61,14 @@ class FeatureModeTest(unittest.TestCase):
             with self.assertRaisesRegex(ValueError,'feature mode'):full.load(saved,None)
             with self.assertRaisesRegex(ValueError,'feature mode'):leg.load(joints.save(),None)
             MotionPriorPPO(PPO(),env,clip,feature_mode='locomotion_joints').load(joints.save(),None)
+            narrow=MotionPriorPPO(PPO(),env,clip,feature_mode='locomotion',pose_guidance_weight=2.,pose_guidance_std=.35)
+            shifted=expected[:1].repeat(2,1);shifted[:,:12]-=.2
+            torch.testing.assert_close(narrow.pose_similarity(shifted),torch.full((2,),np.exp(-(.2/.35)**2)),atol=1e-6,rtol=1e-6)
+            MotionPriorPPO(PPO(),env,clip,feature_mode='locomotion',pose_guidance_weight=2.,pose_guidance_std=.35).load(narrow.save(),None)
+            with self.assertRaisesRegex(ValueError,'pose guidance'):
+                MotionPriorPPO(PPO(),env,clip,feature_mode='locomotion',pose_guidance_weight=2.).load(narrow.save(),None)
+            for invalid in (0.,-1.,float('nan'),float('inf')):
+                with self.assertRaises(ValueError):MotionPriorPPO(PPO(),env,clip,pose_guidance_std=invalid)
             bad=leg.save();bad['motion_prior']['reference_joint_names']=list(reversed(leg.reference_joint_names))
             with self.assertRaisesRegex(ValueError,'joint order'):leg.load(bad,None)
             legacy=full.save();legacy['motion_prior'].pop('feature_mode');legacy['motion_prior'].pop('reference_joint_names');full.load(legacy,None)
