@@ -46,6 +46,7 @@ class TrainConfig:
     env: ManagerBasedRlEnvCfg
     agent: RslRlBaseRunnerCfg
     checkpoint: Path | None = None
+    training_hours: float | None = None
     observation_noise_scale: float = 0.0
     finishing_start_fraction: float = 0.0
     recovery_start_fraction: float = 0.0
@@ -77,6 +78,8 @@ class TrainConfig:
 
 
 def run_train(task_id: str, cfg: TrainConfig, log_dir: Path) -> None:
+    if cfg.training_hours is not None and (not math.isfinite(cfg.training_hours) or cfg.training_hours <= 0):
+        raise ValueError("Training hours must be finite and positive.")
     if cfg.checkpoint is None:
         raise ValueError("Supply checkpoint 1400 or a saved stability checkpoint with --checkpoint.")
     checkpoint = cfg.checkpoint.expanduser().resolve(strict=True)
@@ -223,7 +226,8 @@ def run_train(task_id: str, cfg: TrainConfig, log_dir: Path) -> None:
 
     try:
         runner.learn(
-            num_learning_iterations=cfg.agent.max_iterations
+            num_learning_iterations=cfg.agent.max_iterations,
+            max_wall_time_s=None if cfg.training_hours is None else cfg.training_hours * 3600,
         )
     finally:
         if checkpoint_uploader is not None:

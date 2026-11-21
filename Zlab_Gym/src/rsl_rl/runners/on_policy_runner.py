@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 import os
+import math
 import time
 import torch
 
@@ -53,8 +54,11 @@ class OnPolicyRunner:
 
         self.current_learning_iteration = 0
 
-    def learn(self, num_learning_iterations: int, init_at_random_ep_len: bool = False) -> None:
+    def learn(self, num_learning_iterations: int, init_at_random_ep_len: bool = False,
+              max_wall_time_s: float | None = None) -> None:
         """Run the learning loop for the specified number of iterations."""
+        if max_wall_time_s is not None and (not math.isfinite(max_wall_time_s) or max_wall_time_s <= 0):
+            raise ValueError("Training wall-time budget must be finite and positive.")
         # Randomize initial episode lengths (for exploration)
         if init_at_random_ep_len:
             self.env.episode_length_buf = torch.randint_like(
@@ -76,6 +80,9 @@ class OnPolicyRunner:
         # Start training
         start_it = self.current_learning_iteration
         total_it = start_it + num_learning_iterations
+        deadline = None if max_wall_time_s is None else time.monotonic() + max_wall_time_s
+        if deadline is not None:
+            print(f"[INFO] Continuous training budget: {max_wall_time_s / 3600:.3f} hours; checkpoint every {self.cfg['save_interval']} updates.", flush=True)
         for it in range(start_it, total_it):
             start = time.time()
             # Rollout
@@ -134,6 +141,9 @@ class OnPolicyRunner:
                 and (it + 1) % self.cfg["save_interval"] == 0
             ):
                 self.save(os.path.join(self.logger.log_dir, f"model_{it}.pt"))  # type: ignore
+            if deadline is not None and time.monotonic() >= deadline:
+                print("[INFO] Training wall-time budget reached; saving final checkpoint.", flush=True)
+                break
 
         # Save the final model after training and stop the logging writer
         if self.logger.writer is not None:

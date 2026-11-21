@@ -16,13 +16,20 @@ class MotionPriorPPO:
                  joint_position_std_floor=0.1, pose_guidance_weight=0.0, arm_only=False,
                  leg_only=False, braking_guard_data=None, braking_guard_anchor=None,
                  braking_guard_budget=0.01, feature_mode="full",
-                 braking_guard_projection="uniform", pose_guidance_std=0.75, discriminator_learning_rate=1e-4):
+                 braking_guard_projection="uniform", pose_guidance_std=0.75, discriminator_learning_rate=1e-4, braking_guard_mode="head"):
+        if braking_guard_mode not in ("head", "functional"):
+            raise ValueError("Unknown braking guard mode.")
+        if braking_guard_mode == "functional" and not braking_guard_data:
+            raise ValueError("Functional guard requires calibration and anchor.")
+        if braking_guard_mode == "functional" and (arm_only or leg_only):
+            raise ValueError("Functional guard requires full mean adaptation, not restricted rows.")
+        self.braking_guard_mode = braking_guard_mode
         self.braking_guard_projection = braking_guard_projection
         self.braking_guard = None
         self.braking_guard_config = (braking_guard_data, braking_guard_anchor, braking_guard_budget)
         if bool(braking_guard_data) != bool(braking_guard_anchor):
             raise ValueError("Braking guard needs both calibration data and anchor.")
-        if braking_guard_data and not leg_only:
+        if braking_guard_data and not leg_only and braking_guard_mode != "functional":
             raise ValueError("Braking guard currently requires leg-only adaptation.")
         self.ppo = ppo
         self.env = env.unwrapped
@@ -45,7 +52,7 @@ class MotionPriorPPO:
         if not np.isfinite(pose_guidance_std) or pose_guidance_std <= 0:
             raise ValueError("Pose guidance standard deviation must be finite and positive.")
         self.pose_guidance_std = float(pose_guidance_std)
-        if feature_mode not in ("full", "locomotion", "locomotion_joints"):
+        if feature_mode not in ("full", "locomotion", "locomotion_joints", "wholebody_joints"):
             raise ValueError("Unknown AMP reference feature mode.")
         if feature_mode.startswith("locomotion") and arm_only:
             raise ValueError("Locomotion features cannot guide arm-only adaptation.")
@@ -66,7 +73,7 @@ class MotionPriorPPO:
             canonical = json.loads(profile.read_text())["joint_names"]
             columns = [canonical.index(name) for name in names]
             features = np.concatenate((motion["joint_pos"][:, columns], motion["joint_vel"][:, columns]), axis=1)
-            self.extended_features = "body_features" in motion and feature_mode != "locomotion_joints"
+            self.extended_features = "body_features" in motion and not feature_mode.endswith("_joints")
             if self.extended_features:
                 if str(motion["body_feature_schema"].item()) != "root-gravity-feet-v1":
                     raise ValueError("Unknown AMP body feature schema.")
@@ -259,6 +266,7 @@ class MotionPriorPPO:
                                      leg_only=self.leg_only,
                                      arm_action_names=self.arm_action_names,
                                      teacher_sha256=self.teacher_identity,
+                                     braking_guard_mode=self.braking_guard_mode,
                                      braking_guard=self.braking_guard.save() if self.braking_guard else None)
         return state
 
@@ -291,15 +299,22 @@ class MotionPriorPPO:
         if self.arm_only or self.leg_only:
             # Capture protected rows AFTER loading seed/candidate actor weights.
             self.configure_arm_adapter()
+        if prior and not self.reset_prior and prior.get("braking_guard_mode", "head") != self.braking_guard_mode:
+            raise ValueError("Braking guard mode changed; explicitly reset the prior.")
         guard_state = prior.get("braking_guard") if prior else None
         if not self.reset_prior and bool(guard_state) != bool(self.braking_guard_config[0]):
             raise ValueError("Braking guard mode changed; explicitly reset the prior.")
         if self.braking_guard_config[0]:
-            from scripts.braking_guard import BrakingGuard
             data, anchor, budget = self.braking_guard_config
-            self.braking_guard = BrakingGuard(self.ppo.get_policy(), self.arm_adapter, data, anchor, budget,
-                                              self.env.action_manager.get_term("joint_pos").scale,
-                                              projection_mode=self.braking_guard_projection)
+            term = self.env.action_manager.get_term("joint_pos")
+            if self.braking_guard_mode == "functional":
+                from scripts.functional_braking_guard import FunctionalBrakingGuard
+                self.braking_guard = FunctionalBrakingGuard(self.ppo.get_policy(), data, anchor, budget,
+                                                            term.target_names, term.scale)
+            else:
+                from scripts.braking_guard import BrakingGuard
+                self.braking_guard = BrakingGuard(self.ppo.get_policy(), self.arm_adapter, data, anchor, budget,
+                                                  term.scale, projection_mode=self.braking_guard_projection)
             if guard_state and not self.reset_prior:
                 self.braking_guard.restore(guard_state)
             self.braking_guard.project()
