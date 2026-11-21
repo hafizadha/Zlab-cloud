@@ -101,6 +101,7 @@ class BallSprintOnPolicyRunner(VelocityOnPolicyRunner):
                                       joint_position_std_floor=float(os.environ.get("ZLAB_AMP_POSITION_STD_FLOOR", "0.1")),
                                       pose_guidance_weight=float(os.environ.get("ZLAB_AMP_POSE_GUIDANCE_WEIGHT", "0.0")),
                                       pose_guidance_std=float(os.environ.get("ZLAB_AMP_POSE_GUIDANCE_STD", "0.75")),
+                                      discriminator_learning_rate=float(os.environ.get("ZLAB_AMP_DISCRIMINATOR_LR", "1e-4")),
                                       arm_only=os.environ.get("ZLAB_AMP_ARM_ONLY") == "1",
                                       leg_only=os.environ.get("ZLAB_AMP_LEG_ONLY") == "1",
                                       teacher_checkpoint=os.environ.get("ZLAB_AMP_BRAKING_TEACHER"),

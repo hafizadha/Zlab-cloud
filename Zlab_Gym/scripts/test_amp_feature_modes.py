@@ -69,6 +69,14 @@ class FeatureModeTest(unittest.TestCase):
                 MotionPriorPPO(PPO(),env,clip,feature_mode='locomotion',pose_guidance_weight=2.).load(narrow.save(),None)
             for invalid in (0.,-1.,float('nan'),float('inf')):
                 with self.assertRaises(ValueError):MotionPriorPPO(PPO(),env,clip,pose_guidance_std=invalid)
+            slow_judge=MotionPriorPPO(PPO(),env,clip,discriminator_learning_rate=1e-5)
+            self.assertEqual(slow_judge.discriminator_optimizer.param_groups[0]['lr'],1e-5)
+            slow_judge.optimizer.param_groups[0]['lr']=5e-6
+            self.assertEqual(slow_judge.save()['motion_prior']['optimizer']['param_groups'][0]['lr'],1e-5)
+            restored=MotionPriorPPO(PPO(),env,clip);restored.load(slow_judge.save(),None)
+            self.assertEqual(restored.discriminator_optimizer.param_groups[0]['lr'],1e-5)
+            for invalid in (0.,-1.,float('nan'),float('inf')):
+                with self.assertRaises(ValueError):MotionPriorPPO(PPO(),env,clip,discriminator_learning_rate=invalid)
             bad=leg.save();bad['motion_prior']['reference_joint_names']=list(reversed(leg.reference_joint_names))
             with self.assertRaisesRegex(ValueError,'joint order'):leg.load(bad,None)
             legacy=full.save();legacy['motion_prior'].pop('feature_mode');legacy['motion_prior'].pop('reference_joint_names');full.load(legacy,None)

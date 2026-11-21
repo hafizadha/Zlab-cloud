@@ -16,7 +16,7 @@ class MotionPriorPPO:
                  joint_position_std_floor=0.1, pose_guidance_weight=0.0, arm_only=False,
                  leg_only=False, braking_guard_data=None, braking_guard_anchor=None,
                  braking_guard_budget=0.01, feature_mode="full",
-                 braking_guard_projection="uniform", pose_guidance_std=0.75):
+                 braking_guard_projection="uniform", pose_guidance_std=0.75, discriminator_learning_rate=1e-4):
         self.braking_guard_projection = braking_guard_projection
         self.braking_guard = None
         self.braking_guard_config = (braking_guard_data, braking_guard_anchor, braking_guard_budget)
@@ -96,7 +96,9 @@ class MotionPriorPPO:
         self.discriminator = nn.Sequential(nn.Linear(dim, 256), nn.ELU(),
                                            nn.Linear(256, 128), nn.ELU(), nn.Linear(128, 1)).to(device)
         # Keep the PPO optimizer interface delegated through __getattr__.
-        self.discriminator_optimizer = torch.optim.Adam(self.discriminator.parameters(), lr=1e-4)
+        if not np.isfinite(discriminator_learning_rate) or discriminator_learning_rate <= 0:
+            raise ValueError("Discriminator learning rate must be finite and positive.")
+        self.discriminator_optimizer = torch.optim.Adam(self.discriminator.parameters(), lr=float(discriminator_learning_rate))
         self.samples = []
         self.previous = None
         self.running = None
