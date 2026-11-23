@@ -28,7 +28,7 @@ from src.tasks.velocity.config.z01_std_add_head.ball_sprint import (
     CHECKPOINT_TASK, DEFAULT_FOOT_FRICTION, STABILITY_SPEED, STABILITY_STAGE,
     foot_ball_proximity, forward_ball_clearance_error, set_foot_friction, set_observation_noise,
     set_push_strength, stop_lateral_instability, amp_gait_env_cfg,
-    slow_limb_symmetry, add_foot_pair_penalty,
+    slow_limb_symmetry, add_foot_pair_penalty, SettledArmsDown,
 )
 from typing import Literal
 from pathlib import Path
@@ -51,6 +51,7 @@ class TrainConfig:
     finishing_start_fraction: float = 0.0
     recovery_start_fraction: float = 0.0
     relaxed_stop_arms: bool = True
+    settled_arms_down: bool = False
     amp_gait_stage: bool = False
     running_symmetry_gate: bool = False
     foot_pair_penalty: bool = False
@@ -107,6 +108,11 @@ def run_train(task_id: str, cfg: TrainConfig, log_dir: Path) -> None:
                 cfg.env.rewards[name].func = slow_limb_symmetry
         cfg.env.commands["twist"].finishing_start_fraction = cfg.finishing_start_fraction
         cfg.env.commands["twist"].recovery_start_fraction = cfg.recovery_start_fraction
+        if cfg.settled_arms_down:
+            if not cfg.relaxed_stop_arms:
+                raise ValueError("Settled arms-down training requires relaxed-stop-arms enabled.")
+            cfg.env.rewards["relaxed_stop_arms"] = RewardTermCfg(func=SettledArmsDown, weight=-1.5)
+            print("[Policy objective] SettledArmsDown enabled, weight=-1.5; plain actor inference.", flush=True)
         if not cfg.relaxed_stop_arms:
             cfg.env.rewards["relaxed_stop_arms"].weight = 0.0
         cfg.env.commands["twist"].lateral_correction = cfg.lateral_correction

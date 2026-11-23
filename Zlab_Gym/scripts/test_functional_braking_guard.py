@@ -32,4 +32,19 @@ class TestGuard(unittest.TestCase):
    self.assertTrue(torch.equal(a.mlp[0].weight,original['mlp.0.weight']))
    with self.assertRaisesRegex(ValueError,'order'):FunctionalBrakingGuard(a,cal,cp,.01,['b','a'],torch.tensor([.25,0.]))
    with self.assertRaisesRegex(ValueError,'scale'):FunctionalBrakingGuard(a,cal,cp,.01,['a','b'],torch.tensor([.5,0.]))
+class ScopedGuardTest(unittest.TestCase):
+ def test_arms_free_locomotion_bounded_and_resume_strict(self):
+  names=['waist_yaw']+[f'{side}_{joint}' for side in ['left','right'] for joint in ['hip_pitch','hip_roll','hip_yaw','knee','ankle_pitch','ankle_roll']]+['left_shoulder_pitch']
+  a=Actor();a.mlp[-1]=nn.Linear(8,14);x=torch.randn(180,4)
+  with tempfile.TemporaryDirectory() as tmp:
+   root=Path(tmp);cp=root/'anchor.pt';cal=root/'cal.pt';torch.save({'actor_state_dict':copy.deepcopy(a.state_dict())},cp);torch.save({'observations':x,'commands':torch.zeros(180),'action_names':names,'scale':torch.ones(14)},cal)
+   g=FunctionalBrakingGuard(a,cal,cp,.01,names,torch.ones(14),scope='locomotion')
+   with torch.no_grad():a.mlp[-1].bias[-1].add_(1.)
+   result=g.project();self.assertEqual(result['amp_braking_guard_retained_fraction'],1.);self.assertLess(g._bound(x),1e-6)
+   with torch.no_grad():a.mlp[-1].bias[0].add_(1.)
+   self.assertLessEqual(g.project()['amp_braking_guard_max_rad'],.01)
+   saved=g.save();self.assertEqual(len(saved['identity']['bounded_action_names']),13);g.restore(saved)
+   allguard=FunctionalBrakingGuard(a,cal,cp,.01,names,torch.ones(14))
+   with self.assertRaisesRegex(ValueError,'configuration'):allguard.restore(saved)
+   with self.assertRaisesRegex(ValueError,'scope'):FunctionalBrakingGuard(a,cal,cp,.01,names,torch.ones(14),scope='typo')
 if __name__=='__main__':unittest.main()

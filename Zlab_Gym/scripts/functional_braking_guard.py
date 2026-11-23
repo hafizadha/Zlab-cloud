@@ -7,7 +7,7 @@ import torch
 from tensordict import TensorDict
 
 class FunctionalBrakingGuard:
-    def __init__(self, actor, calibration, anchor, budget, action_names, action_scale):
+    def __init__(self, actor, calibration, anchor, budget, action_names, action_scale, scope="all"):
         if not math.isfinite(budget) or budget <= 0:
             raise ValueError('Functional braking budget must be finite and positive.')
         self.actor = actor
@@ -33,9 +33,19 @@ class FunctionalBrakingGuard:
         raw = data['observations'].reshape(-1,data['observations'].shape[-1])
         self.fixed = raw[data['commands'].flatten()<1.5].to(self.device)
         if len(self.fixed)<128 or not torch.isfinite(self.fixed).all():raise ValueError('Need finite slow-state calibration.')
+        if scope not in ("all", "locomotion"):
+            raise ValueError('Unknown functional guard scope.')
+        self.bounded = torch.ones(len(action_names), dtype=torch.bool, device=self.device)
+        if scope == "locomotion":
+            self.bounded = torch.tensor([n == 'waist_yaw' or any(t in n for t in ('_hip_', '_knee', '_ankle_')) for n in action_names], device=self.device)
+            if int(self.bounded.sum()) != 13:
+                raise ValueError('Locomotion guard expects twelve leg joints and waist yaw.')
         self.recent = self.fixed[:0].clone()
         self.budget = float(budget)
         self.identity = dict(mode='functional',schema=1,budget=self.budget,action_names=list(action_names),calibration_sha256=hashlib.sha256(Path(calibration).read_bytes()).hexdigest(),anchor_sha256=hashlib.sha256(Path(anchor).read_bytes()).hexdigest())
+
+        if scope != "all":
+            self.identity['bounded_action_names'] = [n for n,b in zip(action_names,self.bounded.tolist()) if b]
 
     @torch.no_grad()
     def observe(self, observations, mask):
@@ -51,7 +61,7 @@ class FunctionalBrakingGuard:
             td = TensorDict({'actor':batch},batch_size=[len(batch)])
             difference = (self.actor(td,stochastic_output=False)-self.anchor(td,stochastic_output=False))*self.scale
             if not torch.isfinite(difference).all():return float('inf')
-            maximum = max(maximum,float(difference.abs().max()))
+            maximum = max(maximum,float(difference[:,self.bounded].abs().max()))
         return maximum
 
     @torch.no_grad()

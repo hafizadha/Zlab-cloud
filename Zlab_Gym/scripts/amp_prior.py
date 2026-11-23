@@ -16,13 +16,16 @@ class MotionPriorPPO:
                  joint_position_std_floor=0.1, pose_guidance_weight=0.0, arm_only=False,
                  leg_only=False, braking_guard_data=None, braking_guard_anchor=None,
                  braking_guard_budget=0.01, feature_mode="full",
-                 braking_guard_projection="uniform", pose_guidance_std=0.75, discriminator_learning_rate=1e-4, braking_guard_mode="head"):
+                 braking_guard_projection="uniform", pose_guidance_std=0.75, discriminator_learning_rate=1e-4, braking_guard_mode="head", braking_guard_scope="all"):
         if braking_guard_mode not in ("head", "functional"):
             raise ValueError("Unknown braking guard mode.")
         if braking_guard_mode == "functional" and not braking_guard_data:
             raise ValueError("Functional guard requires calibration and anchor.")
         if braking_guard_mode == "functional" and (arm_only or leg_only):
             raise ValueError("Functional guard requires full mean adaptation, not restricted rows.")
+        if braking_guard_scope not in ("all", "locomotion") or (braking_guard_scope != "all" and braking_guard_mode != "functional"):
+            raise ValueError("Locomotion scope requires the functional guard.")
+        self.braking_guard_scope = braking_guard_scope
         self.braking_guard_mode = braking_guard_mode
         self.braking_guard_projection = braking_guard_projection
         self.braking_guard = None
@@ -310,7 +313,7 @@ class MotionPriorPPO:
             if self.braking_guard_mode == "functional":
                 from scripts.functional_braking_guard import FunctionalBrakingGuard
                 self.braking_guard = FunctionalBrakingGuard(self.ppo.get_policy(), data, anchor, budget,
-                                                            term.target_names, term.scale)
+                                                            term.target_names, term.scale, scope=self.braking_guard_scope)
             else:
                 from scripts.braking_guard import BrakingGuard
                 self.braking_guard = BrakingGuard(self.ppo.get_policy(), self.arm_adapter, data, anchor, budget,

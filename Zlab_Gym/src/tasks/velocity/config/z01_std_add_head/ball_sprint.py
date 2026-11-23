@@ -110,6 +110,7 @@ class BallSprintOnPolicyRunner(VelocityOnPolicyRunner):
                                       braking_guard_budget=float(os.environ.get("ZLAB_AMP_BRAKING_GUARD_BUDGET", "0.01")),
                                       feature_mode=os.environ.get("ZLAB_AMP_FEATURE_MODE", "full"),
                                       braking_guard_mode=os.environ.get("ZLAB_AMP_BRAKING_GUARD_MODE", "head"),
+                                      braking_guard_scope=os.environ.get("ZLAB_AMP_BRAKING_GUARD_SCOPE", "all"),
                                       braking_guard_projection=os.environ.get("ZLAB_AMP_BRAKING_GUARD_PROJECTION", "uniform"))
 
     def save(self, path: str, infos=None):
@@ -576,6 +577,25 @@ class RelaxedStopArms(ManagerTermBase):
         squared_error = self.pose_error().square()
         bounded_error = 2.0 * squared_error / (0.60**2 + squared_error)
         return weight * bounded_error.mean(dim=1)
+
+
+class SettledArmsDown(RelaxedStopArms):
+    """Train the actor to lower its arms once stopping is commanded and settled.
+
+    This changes training reward only; there is no inference action override.
+    Unlike the legacy hold-timer gate, a brief hold reset cannot remove the cue.
+    """
+
+    def __call__(self, env):
+        robot = env.scene["robot"].data
+        twist = env.command_manager.get_term("twist")
+        command = twist.command
+        speed = robot.root_link_lin_vel_w[:, :2].norm(dim=1)
+        settled = ((0.40 - speed) / 0.15).clamp(0.0, 1.0)
+        gate = ((command[:, :2].norm(dim=1) <= 0.25) | (twist.stop_steps > 0)) & (robot.projected_gravity_b[:, 2] < -0.9)
+        # Smooth L1-like error retains a useful slope for raised shoulders.
+        error = (torch.sqrt(1.0 + (self.pose_error() / 0.60).square()) - 1.0).mean(dim=1)
+        return gate * settled * error.clamp_max(3.0)
 
 
 def stop_lateral_instability(env):
