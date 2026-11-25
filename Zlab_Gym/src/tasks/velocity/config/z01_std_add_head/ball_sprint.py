@@ -38,7 +38,7 @@ BALL_CONTACT_SENSOR = "robot_ball_contact"
 HELD_JOINTS = r"(?:head_.*|(?:left|right)_wrist_.*)"
 MOVING_JOINTS = rf"(?!{HELD_JOINTS}$).*"
 STOP_HEADING_RAD = math.radians(12)
-STOP_HOLD_SECONDS = 5.0
+STOP_HOLD_SECONDS = 2.0
 STANDING_ARM_POSE = {
     "left_shoulder_pitch": 0.0,
     "left_shoulder_roll": 0.20,
@@ -111,6 +111,7 @@ class BallSprintOnPolicyRunner(VelocityOnPolicyRunner):
                                       feature_mode=os.environ.get("ZLAB_AMP_FEATURE_MODE", "full"),
                                       braking_guard_mode=os.environ.get("ZLAB_AMP_BRAKING_GUARD_MODE", "head"),
                                       braking_guard_scope=os.environ.get("ZLAB_AMP_BRAKING_GUARD_SCOPE", "all"),
+                                      stop_arm_aux=os.environ.get("ZLAB_AMP_STOP_ARM_AUX") == "1",
                                       braking_guard_projection=os.environ.get("ZLAB_AMP_BRAKING_GUARD_PROJECTION", "uniform"))
 
     def save(self, path: str, infos=None):

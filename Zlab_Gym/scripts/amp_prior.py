@@ -16,7 +16,7 @@ class MotionPriorPPO:
                  joint_position_std_floor=0.1, pose_guidance_weight=0.0, arm_only=False,
                  leg_only=False, braking_guard_data=None, braking_guard_anchor=None,
                  braking_guard_budget=0.01, feature_mode="full",
-                 braking_guard_projection="uniform", pose_guidance_std=0.75, discriminator_learning_rate=1e-4, braking_guard_mode="head", braking_guard_scope="all"):
+                 braking_guard_projection="uniform", pose_guidance_std=0.75, discriminator_learning_rate=1e-4, braking_guard_mode="head", braking_guard_scope="all", stop_arm_aux=False):
         if braking_guard_mode not in ("head", "functional"):
             raise ValueError("Unknown braking guard mode.")
         if braking_guard_mode == "functional" and not braking_guard_data:
@@ -26,6 +26,10 @@ class MotionPriorPPO:
         if braking_guard_scope not in ("all", "locomotion") or (braking_guard_scope != "all" and braking_guard_mode != "functional"):
             raise ValueError("Locomotion scope requires the functional guard.")
         self.braking_guard_scope = braking_guard_scope
+        self.stop_arm_aux = bool(stop_arm_aux)
+        self.arm_aux_samples = []
+        if self.stop_arm_aux and braking_guard_scope != "locomotion":
+            raise ValueError("Stop arm auxiliary requires locomotion guard scope.")
         self.braking_guard_mode = braking_guard_mode
         self.braking_guard_projection = braking_guard_projection
         self.braking_guard = None
@@ -185,6 +189,8 @@ class MotionPriorPPO:
             raise RuntimeError("Load an anchor-compatible checkpoint before guarded training.")
         if self.braking_guard is not None:
             self.braking_guard.observe(obs, command < 1.5)
+        if self.stop_arm_aux:
+            self.arm_aux_samples.append(obs['actor'].detach().clone())
         return self.ppo.act(obs)
 
     def process_env_step(self, obs, rewards, dones, extras):
@@ -250,6 +256,12 @@ class MotionPriorPPO:
                     self.discriminator_optimizer.step()
                 losses.update(amp_discriminator=loss.item(), amp_real_score=real_score.mean().item(),
                               amp_policy_score=fake_score.mean().item())
+        if self.stop_arm_aux and self.arm_aux_samples:
+            from scripts.stop_arm_aux import update_stop_arms
+            raw = torch.cat(self.arm_aux_samples)[-4096:].clone()
+            self.arm_aux_samples.clear()
+            losses.update(update_stop_arms(self.ppo.get_policy(), self.braking_guard.anchor,
+                                           self.env.action_manager.get_term("joint_pos"), raw))
         if self.braking_guard is not None:
             losses.update(self.braking_guard.project())
         self.updates += 1
@@ -269,6 +281,7 @@ class MotionPriorPPO:
                                      leg_only=self.leg_only,
                                      arm_action_names=self.arm_action_names,
                                      teacher_sha256=self.teacher_identity,
+                                     stop_arm_aux=self.stop_arm_aux,
                                      braking_guard_mode=self.braking_guard_mode,
                                      braking_guard=self.braking_guard.save() if self.braking_guard else None)
         return state
@@ -277,6 +290,8 @@ class MotionPriorPPO:
         result = self.ppo.load(state, load_cfg, strict)
         prior = state.get("motion_prior")
         if prior and not self.reset_prior:
+            if prior.get("stop_arm_aux", False) != self.stop_arm_aux:
+                raise ValueError("Stop arm auxiliary changed; explicitly reset prior.")
             if prior.get("feature_mode", "full") != self.feature_mode:
                 raise ValueError("AMP reference feature mode changed; explicitly reset the prior.")
             if prior.get("reference_joint_names", self.reference_joint_names) != self.reference_joint_names:
