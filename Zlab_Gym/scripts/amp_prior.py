@@ -256,14 +256,14 @@ class MotionPriorPPO:
                     self.discriminator_optimizer.step()
                 losses.update(amp_discriminator=loss.item(), amp_real_score=real_score.mean().item(),
                               amp_policy_score=fake_score.mean().item())
+        if self.braking_guard is not None:
+            losses.update(self.braking_guard.project())
         if self.stop_arm_aux and self.arm_aux_samples:
             from scripts.stop_arm_aux import update_stop_arms
             raw = torch.cat(self.arm_aux_samples)[-4096:].clone()
             self.arm_aux_samples.clear()
             losses.update(update_stop_arms(self.ppo.get_policy(), self.braking_guard.anchor,
                                            self.env.action_manager.get_term("joint_pos"), raw))
-        if self.braking_guard is not None:
-            losses.update(self.braking_guard.project())
         self.updates += 1
         return losses
 

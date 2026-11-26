@@ -41,6 +41,10 @@ class FunctionalBrakingGuard:
             if int(self.bounded.sum()) != 13:
                 raise ValueError('Locomotion guard expects twelve leg joints and waist yaw.')
         self.recent = self.fixed[:0].clone()
+        self.free_arm_rows = None
+        if scope == "locomotion":
+            self.free_arm_rows = torch.tensor([('shoulder_' in n or n.endswith('_elbow')) for n in action_names],device=self.device)
+            if int(self.free_arm_rows.sum()) != 8:raise ValueError('Expected eight free arm rows.')
         self.budget = float(budget)
         self.identity = dict(mode='functional',schema=1,budget=self.budget,action_names=list(action_names),calibration_sha256=hashlib.sha256(Path(calibration).read_bytes()).hexdigest(),anchor_sha256=hashlib.sha256(Path(anchor).read_bytes()).hexdigest())
 
@@ -65,6 +69,14 @@ class FunctionalBrakingGuard:
         return maximum
 
     @torch.no_grad()
+    def _preserve_arm_head(self, proposal):
+        if self.free_arm_rows is not None:
+            head = self.actor.mlp[-1]
+            for k,p in self.parameters.items():
+                if p is head.weight or p is head.bias:
+                    p[self.free_arm_rows] = proposal[k][self.free_arm_rows]
+
+    @torch.no_grad()
     def project(self):
         for k,v in self.protected.items():
             if not torch.equal(self.actor.state_dict()[k],v):raise ValueError('Functional guard protected state changed: '+k)
@@ -76,12 +88,14 @@ class FunctionalBrakingGuard:
         retained = 1.
         for _ in range(17):
             for k,p in self.parameters.items():p.copy_(self.seed[k]+retained*(proposal[k]-self.seed[k]))
+            self._preserve_arm_head(proposal)
             maximum = self._bound(raw)
             if maximum<=self.budget*.999:break
             retained *= .5
         else:
             retained = 0.
             for k,p in self.parameters.items():p.copy_(self.seed[k])
+            self._preserve_arm_head(proposal)
             maximum = self._bound(raw)
         if maximum>self.budget:raise RuntimeError('Functional braking bound failed after rollback.')
         return dict(amp_braking_guard_max_rad=maximum,amp_braking_guard_retained_fraction=retained,amp_braking_guard_states=len(raw))
