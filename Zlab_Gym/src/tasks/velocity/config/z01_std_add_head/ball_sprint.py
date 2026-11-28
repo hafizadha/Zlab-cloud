@@ -492,6 +492,30 @@ def lane_tracking_error(env):
     ) / 3.0
 
 
+def alignment_recovery_terms(env):
+    """Training-only lateral recovery signal; valid holds are never penalized."""
+    robot = env.scene["robot"].data
+    command = env.command_manager.get_term("twist")
+    gap = command.ball_spawn_xy[:, 0] - robot.root_link_pos_w[:, 0]
+    lateral = robot.root_link_pos_w[:, 1] - command.ball_spawn_xy[:, 1]
+    near = ((1.8 - gap) / 0.8).clamp(0.0, 1.0)
+    off_center = ((lateral.abs() - 0.20) / 0.15).clamp(0.0, 1.0)
+    active = (command.command[:, 0] < 0.5) & (command.stop_steps == 0) & (robot.projected_gravity_b[:, 2] < -0.9)
+    vy = robot.root_link_lin_vel_w[:, 1]
+    slow = ((0.18 - vy.abs()) / 0.18).clamp(0.0, 1.0)
+    idle = near * off_center * active * slow
+    progress = near * off_center * active * (-lateral.sign() * vy).clamp(-0.3, 0.3)
+    return idle, progress
+
+
+def off_center_idle(env):
+    return alignment_recovery_terms(env)[0]
+
+
+def lateral_recovery_progress(env):
+    return alignment_recovery_terms(env)[1]
+
+
 def sprint_progress(env):
     robot = env.scene["robot"].data
     forward_command = env.command_manager.get_command("twist")[:, 0]

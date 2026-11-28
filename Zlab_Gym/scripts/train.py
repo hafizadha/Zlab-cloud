@@ -28,7 +28,7 @@ from src.tasks.velocity.config.z01_std_add_head.ball_sprint import (
     CHECKPOINT_TASK, DEFAULT_FOOT_FRICTION, STABILITY_SPEED, STABILITY_STAGE,
     foot_ball_proximity, forward_ball_clearance_error, set_foot_friction, set_observation_noise,
     set_push_strength, stop_lateral_instability, amp_gait_env_cfg,
-    slow_limb_symmetry, add_foot_pair_penalty, SettledArmsDown,
+    slow_limb_symmetry, add_foot_pair_penalty, SettledArmsDown, off_center_idle, lateral_recovery_progress,
 )
 from typing import Literal
 from pathlib import Path
@@ -52,6 +52,7 @@ class TrainConfig:
     recovery_start_fraction: float = 0.0
     relaxed_stop_arms: bool = True
     settled_arms_down: bool = False
+    alignment_recovery: bool = False
     amp_gait_stage: bool = False
     running_symmetry_gate: bool = False
     foot_pair_penalty: bool = False
@@ -108,6 +109,10 @@ def run_train(task_id: str, cfg: TrainConfig, log_dir: Path) -> None:
                 cfg.env.rewards[name].func = slow_limb_symmetry
         cfg.env.commands["twist"].finishing_start_fraction = cfg.finishing_start_fraction
         cfg.env.commands["twist"].recovery_start_fraction = cfg.recovery_start_fraction
+        if cfg.alignment_recovery:
+            cfg.env.rewards["off_center_idle"] = RewardTermCfg(func=off_center_idle, weight=-3.0)
+            cfg.env.rewards["lateral_recovery_progress"] = RewardTermCfg(func=lateral_recovery_progress, weight=8.0)
+            print("[Recovery objective] Off-center idle=-3; directed lateral progress=8; valid holds excluded.", flush=True)
         if cfg.settled_arms_down:
             if not cfg.relaxed_stop_arms:
                 raise ValueError("Settled arms-down training requires relaxed-stop-arms enabled.")
